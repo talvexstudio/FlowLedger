@@ -51,7 +51,8 @@ export function AccountFormSheet({ isOpen, onOpenChange, account, onSave }: Acco
         openingBalance: account.openingBalance,
       });
     }
-  }, [isOpen, account ? account.id : '']);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, account?.id]);
 
   const onSubmit = async (data: AccountFormValues) => {
     try {
