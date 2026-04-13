@@ -139,7 +139,16 @@ export function AccountFormSheet({ isOpen, onOpenChange, account, onSave }: Acco
                   <FormItem>
                     <FormLabel>Opening Balance</FormLabel>
                     <FormControl>
-                      <Input type="number" step="0.01" {...field} onChange={e => field.onChange(parseFloat(e.target.value))} />
+                      <Input
+                        type="number"
+                        step="0.01"
+                        {...field}
+                        value={field.value ?? ''}
+                        onChange={e => {
+                          const value = e.target.value;
+                          field.onChange(value === '' ? 0 : parseFloat(value));
+                        }}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
