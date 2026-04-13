@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -24,6 +24,7 @@ interface AccountFormSheetProps {
 
 export function AccountFormSheet({ isOpen, onOpenChange, account, onSave }: AccountFormSheetProps) {
   const { toast } = useToast();
+  const prevIsOpenRef = useRef(false);
   const form = useForm<AccountFormValues>({
     resolver: zodResolver(accountSchema),
     defaultValues: {
@@ -35,24 +36,28 @@ export function AccountFormSheet({ isOpen, onOpenChange, account, onSave }: Acco
     },
   });
 
-  // Reset form when sheet opens or when the account changes
+  // Reset form ONLY when sheet opens (not on every re-render)
   useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
+    const wasOpenBefore = prevIsOpenRef.current;
+    prevIsOpenRef.current = isOpen;
 
-    // Only reset if we have an account to populate
-    if (account) {
-      form.reset({
-        name: account.name,
-        type: account.type,
-        currency: account.currency,
-        institution: account.institution,
-        openingBalance: account.openingBalance,
-      });
+    // Only reset form when opening (false → true transition)
+    if (isOpen && !wasOpenBefore) {
+      if (account) {
+        // Editing existing account
+        form.reset({
+          name: account.name,
+          type: account.type,
+          currency: account.currency,
+          institution: account.institution,
+          openingBalance: account.openingBalance,
+        });
+      } else {
+        // Creating new account
+        form.reset();
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, account?.id]);
+  }, [isOpen, account, form]);
 
   const onSubmit = async (data: AccountFormValues) => {
     try {
