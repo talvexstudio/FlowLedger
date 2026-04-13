@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Landmark, CreditCard, Smartphone, Wallet, TrendingUp, HelpCircle, MoreVertical, Archive, Trash2, Edit, TriangleAlert } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { useEffect, useState } from 'react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '../ui/alert-dialog';
 
 const accountIcons: { [key in Account['type']]: React.ReactNode } = {
@@ -19,19 +18,13 @@ const accountIcons: { [key in Account['type']]: React.ReactNode } = {
 
 interface AccountCardProps {
   account: Account;
+  balance: number;
   onEdit: (account: Account) => void;
   onArchive: (account: Account) => void;
   onDelete: (account: Account) => void;
 }
 
-export function AccountCard({ account, onEdit, onArchive, onDelete }: AccountCardProps) {
-  const [currentBalance, setCurrentBalance] = useState<number | null>(null);
-
-  useEffect(() => {
-    // In a real app, this balance would be calculated from transactions.
-    // For this demo, we use a random value to simulate a live balance.
-    setCurrentBalance(account.openingBalance + Math.random() * 5000 - 2500);
-  }, [account.openingBalance]);
+export function AccountCard({ account, balance, onEdit, onArchive, onDelete }: AccountCardProps) {
 
   return (
     <Card className="relative flex flex-col">
@@ -43,13 +36,9 @@ export function AccountCard({ account, onEdit, onArchive, onDelete }: AccountCar
         {accountIcons[account.type]}
       </CardHeader>
       <CardContent className="flex-grow flex flex-col justify-end">
-        {currentBalance !== null ? (
-            <div className="text-2xl font-bold">
-            {new Intl.NumberFormat('de-DE', { style: 'currency', currency: account.currency }).format(currentBalance)}
-            </div>
-        ) : (
-            <div className="h-8 w-32 bg-muted rounded animate-pulse" />
-        )}
+        <div className="text-2xl font-bold">
+          {new Intl.NumberFormat('de-DE', { style: 'currency', currency: account.currency }).format(balance)}
+        </div>
       </CardContent>
       <div className="absolute top-2 right-2">
         <AlertDialog>

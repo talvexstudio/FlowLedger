@@ -1,0 +1,29 @@
+[
+  {
+    "createdAt": "2026-04-12T17:48:03.107Z",
+    "name": "Activo",
+    "description": "XLSX template created from movActivo 2025-04_.xlsx",
+    "sourceType": "XLSX",
+    "headerSignature": [
+      "Data Lanc.",
+      "Data Valor",
+      "Descrição",
+      "Valor",
+      "Saldo"
+    ],
+    "mapping": {
+      "dateField": "Data Valor",
+      "descriptionField": "Descrição",
+      "amountField": "Valor",
+      "balanceField": "Saldo",
+      "amountOptions": {
+        "decimalSeparator": ",",
+        "thousandsSeparator": "."
+      }
+    },
+    "defaultAccountId": "acc1",
+    "workspaceId": "ws1",
+    "id": "imp_1776016083108_r6yu9",
+    "updatedAt": "2026-04-12T17:48:03.108Z"
+  }
+]

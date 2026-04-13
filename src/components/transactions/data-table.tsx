@@ -10,6 +10,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,6 +29,17 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { Calendar } from '../ui/calendar';
 import type { DateRange } from 'react-day-picker';
 import { endOfDay, format } from 'date-fns';
+import { Input } from '../ui/input';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -35,15 +47,19 @@ interface TransactionsDataTableProps {
   onEdit: (transaction: Transaction) => void;
   onConfirm: (transaction: Transaction) => void;
   onDelete: (transaction: Transaction) => void;
+  onBulkDelete: (ids: string[]) => void;
 }
 
-export function TransactionsDataTable({ onEdit, onConfirm, onDelete }: TransactionsDataTableProps) {
+export function TransactionsDataTable({ onEdit, onConfirm, onDelete, onBulkDelete }: TransactionsDataTableProps) {
   const { accounts, categories, transactions } = useFlowLedger();
   const [accountFilter, setAccountFilter] = React.useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = React.useState<string[]>([]);
   const [dateRange, setDateRange] = React.useState<DateRange | undefined>();
   const [currentPage, setCurrentPage] = React.useState(1);
   const [openMenuId, setOpenMenuId] = React.useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false);
+  const [searchQuery, setSearchQuery] = React.useState('');
 
   const getCategoryName = (catId?: string) => categories.find(c => c.id === catId)?.name || 'Uncategorized';
   const getAccountName = (accId: string) => accounts.find(a => a.id === accId)?.name || 'Unknown';
@@ -52,6 +68,7 @@ export function TransactionsDataTable({ onEdit, onConfirm, onDelete }: Transacti
 
   const filteredTransactions = React.useMemo(() => {
     let data = [...transactions];
+    const normalizedQuery = searchQuery.trim().toLowerCase();
     if (accountFilter.length > 0) {
       data = data.filter(t => accountFilter.includes(t.accountId));
     }
@@ -66,14 +83,30 @@ export function TransactionsDataTable({ onEdit, onConfirm, onDelete }: Transacti
       const toDate = endOfDay(dateRange.to);
       data = data.filter(t => new Date(t.date) <= toDate);
     }
+    if (normalizedQuery) {
+      data = data.filter((t) => {
+        const description = (t.description || '').toLowerCase();
+        const rawDescription = (t.rawDescription || '').toLowerCase();
+        return description.includes(normalizedQuery) || rawDescription.includes(normalizedQuery);
+      });
+    }
     return data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [transactions, accountFilter, categoryFilter, dateRange]);
+  }, [transactions, accountFilter, categoryFilter, dateRange, searchQuery]);
   
   const totalPages = Math.ceil(filteredTransactions.length / ITEMS_PER_PAGE);
   const paginatedTransactions = filteredTransactions.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
     currentPage * ITEMS_PER_PAGE
   );
+
+  const pageIds = paginatedTransactions.map(t => t.id);
+  const allPageSelected = pageIds.length > 0 && pageIds.every(id => selectedIds.includes(id));
+  const somePageSelected = pageIds.some(id => selectedIds.includes(id)) && !allPageSelected;
+
+  React.useEffect(() => {
+    const existingIds = new Set(transactions.map(t => t.id));
+    setSelectedIds(prev => prev.filter(id => existingIds.has(id)));
+  }, [transactions]);
 
   const toggleAccountFilter = (accountId: string) => {
     setAccountFilter(prev =>
@@ -110,6 +143,15 @@ export function TransactionsDataTable({ onEdit, onConfirm, onDelete }: Transacti
           </CardDescription>
         </div>
         <div className="flex items-center gap-2">
+            <Input
+              placeholder="Search description..."
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="max-w-xs"
+            />
             <Popover>
               <PopoverTrigger asChild>
                 <Button
@@ -195,10 +237,31 @@ export function TransactionsDataTable({ onEdit, onConfirm, onDelete }: Transacti
         </div>
       </CardHeader>
       <CardContent>
+        {selectedIds.length > 0 && (
+          <div className="mb-2 flex items-center justify-between text-sm text-muted-foreground">
+            <span>{selectedIds.length} transaction(s) selected</span>
+            <Button variant="destructive" size="sm" onClick={() => setBulkDeleteOpen(true)}>
+              Delete selected
+            </Button>
+          </div>
+        )}
         <div className="border rounded-md">
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <Checkbox
+                    checked={allPageSelected || (somePageSelected ? "indeterminate" : false)}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setSelectedIds(prev => Array.from(new Set([...prev, ...pageIds])));
+                      } else {
+                        setSelectedIds(prev => prev.filter(id => !pageIds.includes(id)));
+                      }
+                    }}
+                    aria-label="Select all transactions on page"
+                  />
+                </TableHead>
                 <TableHead className="w-[100px]">Date</TableHead>
                 <TableHead>Account</TableHead>
                 <TableHead>Description</TableHead>
@@ -211,9 +274,42 @@ export function TransactionsDataTable({ onEdit, onConfirm, onDelete }: Transacti
               {paginatedTransactions.length > 0 ? (
                 paginatedTransactions.map((t) => (
                   <TableRow key={t.id} data-state={t.needsReview ? 'selected' : ''}>
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedIds.includes(t.id)}
+                        onCheckedChange={(checked) => {
+                          setSelectedIds(prev =>
+                            checked ? [...prev, t.id] : prev.filter(id => id !== t.id)
+                          );
+                        }}
+                        aria-label={`Select transaction ${t.description}`}
+                      />
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{new Date(t.date).toLocaleDateString()}</TableCell>
                     <TableCell>{getAccountName(t.accountId)}</TableCell>
-                    <TableCell className="font-medium">{t.description}</TableCell>
+                    <TableCell className="font-medium">
+                      <div className="flex flex-col gap-1">
+                        <span>{t.description}</span>
+                        {t.isPotentialDuplicate && (
+                          <Badge variant="outline" className="w-fit text-xs border-orange-400 text-orange-600">
+                            Potential duplicate
+                          </Badge>
+                        )}
+                        {t.isPotentialTransfer && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-fit h-auto px-2 py-0.5 text-xs border border-blue-400 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950"
+                            onClick={() => {
+                              // TODO: Auto-link as internal transfer
+                              console.log('Link potential transfer:', t.id, t.potentialTransferMatch?.existingTransaction.id);
+                            }}
+                          >
+                            Link as transfer →
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <Badge variant={t.isInternalTransfer ? "secondary" : "outline"}>{getCategoryName(t.categoryId)}</Badge>
                     </TableCell>
@@ -253,7 +349,7 @@ export function TransactionsDataTable({ onEdit, onConfirm, onDelete }: Transacti
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center">
+                  <TableCell colSpan={7} className="h-24 text-center">
                     No transactions found.
                   </TableCell>
                 </TableRow>
@@ -286,6 +382,29 @@ export function TransactionsDataTable({ onEdit, onConfirm, onDelete }: Transacti
                 </Button>
             </div>
         </div>
+        <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete selected transactions?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete the selected transactions.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  onBulkDelete(selectedIds);
+                  setSelectedIds([]);
+                  setBulkDeleteOpen(false);
+                }}
+                className="bg-destructive hover:bg-destructive/90"
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </CardContent>
     </Card>
   );

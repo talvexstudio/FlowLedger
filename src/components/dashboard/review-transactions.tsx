@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Card,
   CardContent,
@@ -19,12 +19,14 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Check, Edit, MoreVertical } from 'lucide-react';
-import type { Transaction } from '@/lib/types';
+import type { ClassificationRule, Transaction } from '@/lib/types';
 import { TransactionFormSheet } from '../transactions/transaction-form-sheet';
 import { useToast } from '@/hooks/use-toast';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
-import { confirmTransaction, saveTransaction } from '@/lib/services/transactions';
+import { apiConfirmTransaction, apiSaveTransaction, apiSaveRule } from '@/lib/api';
+import { applyRuleClassificationToTransaction, ruleMatchesTransactionForBackfill } from '@/lib/utils/rule-utils';
+import { RuleBackfillPanel } from '@/components/transactions/rule-backfill-panel';
 
 interface ReviewTransactionsProps {
   transactions: Transaction[];
@@ -32,8 +34,11 @@ interface ReviewTransactionsProps {
 
 export function ReviewTransactions({ transactions: initialTransactions }: ReviewTransactionsProps) {
   const { toast } = useToast();
-  const { categories, accounts, reloadTransactions, workspaceId } = useFlowLedger();
+  const { categories, accounts, reloadTransactions, workspaceId, transactions } = useFlowLedger();
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [backfillCandidates, setBackfillCandidates] = useState<Transaction[]>([]);
+  const [pendingRule, setPendingRule] = useState<(ClassificationRule & { categoryName?: string; subcategoryName?: string }) | null>(null);
+  const backfillPanelRef = useRef<HTMLDivElement | null>(null);
 
   const getCategoryName = (catId?: string) => categories.find(c => c.id === catId)?.name || 'Uncategorized';
   const getSubcategoryName = (subcatId?: string) => {
@@ -48,7 +53,7 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
   const handleApprove = async (transactionId: string) => {
     if (!workspaceId) return;
     try {
-      await confirmTransaction(workspaceId, transactionId);
+      await apiConfirmTransaction(workspaceId, transactionId);
       await reloadTransactions();
       toast({
         title: "Transaction Approved",
@@ -67,7 +72,7 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
   const handleSave = async (updatedTransaction: Partial<Transaction>, createRule: boolean) => {
     if (!workspaceId) return;
     try {
-        await saveTransaction(workspaceId, updatedTransaction);
+        const saved = await apiSaveTransaction(workspaceId, updatedTransaction);
         setEditingTransaction(null);
         await reloadTransactions();
         toast({
@@ -75,12 +80,44 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
           description: "Your changes have been saved.",
         });
         if (createRule) {
-          toast({
-            title: "Classification Rule Created",
-            description: "A new rule has been created for similar transactions.",
-          });
-          // In a real app, you would call the generateClassificationRule AI flow.
-          console.log('Creating classification rule for:', updatedTransaction);
+          const descriptionSource = saved.rawDescription || saved.description || "";
+          const descriptionToken = extractRuleTokenFromDescription(descriptionSource);
+          if (descriptionToken && saved.id) {
+            const ruleData: Omit<ClassificationRule, "id"> = {
+              workspaceId,
+              match: {
+                descriptionContains: descriptionToken,
+                accountId: saved.accountId,
+              },
+              action: {
+                categoryId: saved.categoryId,
+                subcategoryId: saved.subcategoryId,
+                type: saved.type,
+              },
+              createdFromTransactionId: saved.id,
+              createdAt: new Date(),
+            };
+            const createdRule = await apiSaveRule(workspaceId, ruleData);
+            toast({
+              title: "Classification Rule Created",
+              description: "A new rule has been created for similar transactions.",
+            });
+            const candidates = transactions.filter(
+              (tx) => tx.id !== saved.id && ruleMatchesTransactionForBackfill(createdRule, tx)
+            );
+            if (candidates.length > 0) {
+              const categoryName = categories.find((c) => c.id === createdRule.action.categoryId)?.name;
+              const subcategoryName = categories
+                .find((c) => c.id === createdRule.action.categoryId)
+                ?.subcategories.find((s) => s.id === createdRule.action.subcategoryId)?.name;
+              setPendingRule({ ...createdRule, categoryName, subcategoryName });
+              setBackfillCandidates(candidates);
+              toast({
+                title: "Rule suggestions available",
+                description: `We found ${candidates.length} similar transaction(s). Review and apply the rule above.`,
+              });
+            }
+          }
         }
     } catch (error) {
         console.error(error);
@@ -91,6 +128,50 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
         });
     }
   };
+
+  const handleConfirmBackfill = async (selectedIds: string[]) => {
+    if (!workspaceId || !pendingRule) return;
+    const rule = pendingRule;
+    const candidates = backfillCandidates;
+
+    setBackfillCandidates([]);
+    setPendingRule(null);
+
+    try {
+      const selected = candidates.filter((tx) => selectedIds.includes(tx.id));
+      if (selected.length > 0) {
+        for (const tx of selected) {
+          const patch = applyRuleClassificationToTransaction(tx, rule, categories);
+          await apiSaveTransaction(workspaceId, patch);
+        }
+        await reloadTransactions();
+        toast({
+          title: "Rule applied",
+          description: `Applied classification to ${selected.length} transaction(s).`,
+        });
+      }
+    } catch (error) {
+      console.error(error);
+      toast({
+        variant: 'destructive',
+        title: 'Backfill failed',
+        description: 'Could not apply the rule to selected transactions.',
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (pendingRule && backfillCandidates.length > 0 && backfillPanelRef.current) {
+      const element = backfillPanelRef.current;
+      const rect = element.getBoundingClientRect();
+      const absoluteTop = rect.top + window.scrollY;
+      const headerOffset = 96; // adjust if header height changes
+      window.scrollTo({
+        top: Math.max(absoluteTop - headerOffset, 0),
+        behavior: 'smooth',
+      });
+    }
+  }, [pendingRule, backfillCandidates.length]);
 
   if (initialTransactions.length === 0) {
     return (
@@ -110,9 +191,27 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
 
   return (
     <>
+      {pendingRule && backfillCandidates.length > 0 && (
+        <div ref={backfillPanelRef}>
+          <RuleBackfillPanel
+            rule={pendingRule}
+            transactions={backfillCandidates}
+            onApply={handleConfirmBackfill}
+            onCancel={() => {
+              setBackfillCandidates([]);
+              setPendingRule(null);
+            }}
+          />
+        </div>
+      )}
       <Card>
         <CardHeader>
-          <CardTitle>Transactions to Review</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            Transactions to Review
+            <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+              {initialTransactions.length}
+            </span>
+          </CardTitle>
           <CardDescription>Confirm or edit the classification for these transactions.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -188,3 +287,7 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
     </>
   );
 }
+
+const extractRuleTokenFromDescription = (description: string): string => {
+  return description.trim();
+};

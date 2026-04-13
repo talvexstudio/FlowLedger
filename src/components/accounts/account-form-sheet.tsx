@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { Account } from '@/lib/types';
 import { accountSchema } from '@/lib/schemas';
+import { useToast } from '@/hooks/use-toast';
 
 type AccountFormValues = z.infer<typeof accountSchema>;
 
@@ -18,10 +19,11 @@ interface AccountFormSheetProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   account: Account | null;
-  onSave: (values: Partial<Account>) => void;
+  onSave: (values: Partial<Account>) => Promise<void>;
 }
 
 export function AccountFormSheet({ isOpen, onOpenChange, account, onSave }: AccountFormSheetProps) {
+  const { toast } = useToast();
   const form = useForm<AccountFormValues>({
     resolver: zodResolver(accountSchema),
     defaultValues: {
@@ -33,7 +35,13 @@ export function AccountFormSheet({ isOpen, onOpenChange, account, onSave }: Acco
     },
   });
 
+  // Reset form when sheet opens or when the account changes
   useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    // Only reset if we have an account to populate
     if (account) {
       form.reset({
         name: account.name,
@@ -42,14 +50,23 @@ export function AccountFormSheet({ isOpen, onOpenChange, account, onSave }: Acco
         institution: account.institution,
         openingBalance: account.openingBalance,
       });
-    } else {
-      form.reset();
     }
-  }, [account, form, isOpen]);
+  }, [isOpen, account ? account.id : '']);
 
-  const onSubmit = (data: AccountFormValues) => {
-    onSave({ id: account?.id, ...data });
+  const onSubmit = async (data: AccountFormValues) => {
+    try {
+      await onSave({ id: account?.id, ...data });
+      form.reset();
+    } catch (error) {
+      toast({
+        title: 'Failed to save account',
+        description: (error as Error).message,
+        variant: 'destructive',
+      });
+    }
   };
+
+  const isSubmitting = form.formState.isSubmitting;
 
   return (
     <Sheet open={isOpen} onOpenChange={onOpenChange}>
@@ -81,7 +98,7 @@ export function AccountFormSheet({ isOpen, onOpenChange, account, onSave }: Acco
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Account Type</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select an account type" />
@@ -133,28 +150,30 @@ export function AccountFormSheet({ isOpen, onOpenChange, account, onSave }: Acco
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Currency</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select currency" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="EUR">EUR</SelectItem>
-                      <SelectItem value="USD">USD</SelectItem>
-                      <SelectItem value="GBP">GBP</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select currency" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="EUR">EUR</SelectItem>
+                        <SelectItem value="USD">USD</SelectItem>
+                        <SelectItem value="GBP">GBP</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
               />
             </div>
             <SheetFooter className="pt-4">
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
                 Cancel
               </Button>
-              <Button type="submit">Save Changes</Button>
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting ? 'Saving...' : 'Save Changes'}
+              </Button>
             </SheetFooter>
           </form>
         </Form>

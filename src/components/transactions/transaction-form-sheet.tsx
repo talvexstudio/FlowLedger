@@ -34,6 +34,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import type { Transaction, Category, Subcategory, Account } from '@/lib/types';
 import { TransactionFormValues, transactionSchema } from '@/lib/schemas';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { format } from 'date-fns';
 
 interface TransactionFormSheetProps {
@@ -63,6 +64,7 @@ export function TransactionFormSheet({
       type: 'Expense',
       categoryId: undefined,
       subcategoryId: undefined,
+      internalDirection: undefined,
       createRule: false,
     },
   });
@@ -77,6 +79,12 @@ export function TransactionFormSheet({
             type: transaction.type ?? 'Expense',
             amountBase: Math.abs(transaction.amountBase || 0), // Edit absolute value
             date: transaction.date ? new Date(transaction.date) : new Date(),
+            internalDirection:
+              transaction.type === 'InternalTransfer'
+                ? (transaction.amountBase ?? 0) < 0
+                  ? 'Out'
+                  : 'In'
+                : undefined,
             createRule: false,
           });
         } else {
@@ -88,6 +96,7 @@ export function TransactionFormSheet({
             type: 'Expense',
             categoryId: undefined,
             subcategoryId: undefined,
+            internalDirection: undefined,
             createRule: false,
           });
         }
@@ -95,31 +104,76 @@ export function TransactionFormSheet({
   }, [transaction, isOpen, form, accounts]);
 
   const selectedCategoryId = form.watch('categoryId');
+  const selectedType = form.watch('type');
+
+  useEffect(() => {
+    if (selectedType === 'InternalTransfer') {
+      const currentDirection = form.getValues('internalDirection');
+      if (!currentDirection) {
+        form.setValue('internalDirection', 'Out');
+      }
+      return;
+    }
+
+    if (form.getValues('internalDirection')) {
+      form.setValue('internalDirection', undefined);
+    }
+  }, [selectedType, form]);
+
+  const activeCategories = useMemo(
+    () => categories.filter(category => category.isActive !== false),
+    [categories]
+  );
 
   const subcategories = useMemo(() => {
     if (!selectedCategoryId) return [];
     const category = categories.find((c) => c.id === selectedCategoryId);
-    return category?.subcategories || [];
+    return (category?.subcategories || []).filter(sub => sub.isActive !== false);
   }, [selectedCategoryId, categories]);
 
   const onSubmit = (data: TransactionFormValues) => {
-    const amount = Math.abs(data.amountBase || 0);
-    const signedAmount = data.type === 'Expense' ? -amount : amount;
+    const rawAmount = data.amountBase ?? 0;
+    const amount = Math.abs(rawAmount);
+    let signedAmount: number;
+    const { createRule, internalDirection, ...transactionFields } = data;
+
+    if (transactionFields.type === 'Expense') {
+      signedAmount = -amount;
+    } else if (transactionFields.type === 'Income') {
+      signedAmount = amount;
+    } else if (transactionFields.type === 'InternalTransfer') {
+      const direction = internalDirection ?? 'Out';
+      signedAmount = direction === 'Out' ? -amount : amount;
+    } else {
+      // Adjustment: keep the raw sign as entered
+      signedAmount = rawAmount;
+    }
 
     const transactionToSave: Partial<Transaction> = {
       ...transaction,
-      ...data,
+      ...transactionFields,
       amountBase: signedAmount,
       amountOriginal: signedAmount, // simplifying for now
       currencyOriginal: 'EUR',
-      needsReview: false, 
+      needsReview: false,
+      ...(internalDirection ? { internalDirection } : {}),
     };
-    onSave(transactionToSave, data.createRule);
+    onSave(transactionToSave, createRule);
   };
   
   const handleCategoryChange = (categoryId: string) => {
     form.setValue('categoryId', categoryId);
     form.setValue('subcategoryId', undefined);
+  }
+
+  const handleSubcategoryChange = (subcategoryId: string) => {
+    form.setValue('subcategoryId', subcategoryId);
+    const categoryId = form.getValues('categoryId');
+    const category = categories.find((cat) => cat.id === categoryId);
+    const subcategory = category?.subcategories?.find((sub) => sub.id === subcategoryId);
+    if (subcategory?.flowType) {
+      form.setValue('type', subcategory.flowType);
+    }
   }
 
   return (
@@ -218,7 +272,7 @@ export function TransactionFormSheet({
                 </FormItem>
               )}
             />
-             
+
             <FormField
                 control={form.control}
                 name="type"
@@ -243,6 +297,75 @@ export function TransactionFormSheet({
                 )}
             />
 
+            {selectedType === 'InternalTransfer' && (
+              <>
+                <FormField
+                  control={form.control}
+                  name="internalDirection"
+                  render={({ field }) => (
+                    <FormItem className="mt-2">
+                      <FormLabel>Transfer direction</FormLabel>
+                      <RadioGroup
+                        className="flex gap-4"
+                        value={field.value ?? 'Out'}
+                        onValueChange={field.onChange}
+                      >
+                        <FormItem className="flex items-center space-x-2">
+                          <FormControl>
+                            <RadioGroupItem value="Out" />
+                          </FormControl>
+                          <FormLabel className="font-normal">Out of this account</FormLabel>
+                        </FormItem>
+                        <FormItem className="flex items-center space-x-2">
+                          <FormControl>
+                            <RadioGroupItem value="In" />
+                          </FormControl>
+                          <FormLabel className="font-normal">Into this account</FormLabel>
+                        </FormItem>
+                      </RadioGroup>
+                      <FormDescription>
+                        Use this to indicate if the amount is leaving or entering this account.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                {!isEditing && (
+                  <FormField
+                    control={form.control}
+                    name="destinationAccountId"
+                    render={({ field }) => {
+                      const selectedAccountId = form.watch('accountId');
+                      const otherAccounts = accounts.filter(a => a.id !== selectedAccountId);
+                      return (
+                        <FormItem>
+                          <FormLabel>Other Account</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value ?? ''}>
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select the other account" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {otherAccounts.map((acc) => (
+                                <SelectItem key={acc.id} value={acc.id}>
+                                  {acc.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>
+                            The matching transaction will be created automatically in this account.
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      );
+                    }}
+                  />
+                )}
+              </>
+            )}
+
 
             <FormField
               control={form.control}
@@ -250,14 +373,14 @@ export function TransactionFormSheet({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Category</FormLabel>
-                  <Select onValueChange={handleCategoryChange} value={field.value}>
+                  <Select onValueChange={handleCategoryChange} value={field.value} key={`cat-${categories.length}`}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select a category" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {categories.map((cat) => (
+                      {activeCategories.map((cat) => (
                         <SelectItem key={cat.id} value={cat.id}>
                           {cat.name}
                         </SelectItem>
@@ -276,7 +399,7 @@ export function TransactionFormSheet({
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Subcategory</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value} key={`sub-${selectedCategoryId}-${subcategories.length}`}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select a subcategory" />

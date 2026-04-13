@@ -7,6 +7,8 @@ export const transactionSchema = z.object({
   description: z.string().min(1, 'Description is required.'),
   amountBase: z.number({ required_error: "Amount is required."}).min(-100000000, "Amount is too low").max(100000000, "Amount is too high"),
   type: z.enum(['Expense', 'Income', 'InternalTransfer', 'Adjustment']),
+  internalDirection: z.enum(['Out', 'In']).optional(),
+  destinationAccountId: z.string().optional(),
   categoryId: z.string().optional(),
   subcategoryId: z.string().optional(),
   createRule: z.boolean().default(false),

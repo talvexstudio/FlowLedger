@@ -1,14 +1,28 @@
 'use client';
 import { UploadCloud } from 'lucide-react';
-import { useState, useId } from 'react';
+import { useId, useState } from 'react';
 
-export function FileUploader() {
-  const [file, setFile] = useState<File | null>(null);
+interface FileUploaderProps {
+  file?: File | null;
+  onFileSelected?: (file: File | null) => void;
+}
+
+export function FileUploader({ file: controlledFile, onFileSelected }: FileUploaderProps) {
+  const [internalFile, setInternalFile] = useState<File | null>(null);
   const id = useId();
+  const file = controlledFile ?? internalFile;
+
+  const updateFile = (nextFile: File | null) => {
+    if (onFileSelected) {
+      onFileSelected(nextFile);
+      return;
+    }
+    setInternalFile(nextFile);
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      setFile(e.target.files[0]);
+      updateFile(e.target.files[0]);
     }
   };
   
@@ -16,7 +30,7 @@ export function FileUploader() {
     e.preventDefault();
     e.stopPropagation();
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      setFile(e.dataTransfer.files[0]);
+      updateFile(e.dataTransfer.files[0]);
     }
   };
 

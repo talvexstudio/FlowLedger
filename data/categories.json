@@ -1,0 +1,232 @@
+[
+  {
+    "id": "cat_housing",
+    "name": "Housing",
+    "type": "expense",
+    "order": 1,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_rent", "categoryId": "cat_housing", "name": "Rent", "order": 1, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_mortgage", "categoryId": "cat_housing", "name": "Mortgage", "order": 2, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_home_insurance", "categoryId": "cat_housing", "name": "Home Insurance", "order": 3, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_maintenance", "categoryId": "cat_housing", "name": "Maintenance", "order": 4, "isSystem": true, "isActive": true, "flowType": "Expense" }
+    ]
+  },
+  {
+    "id": "cat_groceries",
+    "name": "Essential Groceries",
+    "type": "expense",
+    "order": 2,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_supermarket", "categoryId": "cat_groceries", "name": "Supermarket", "order": 1, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_local_market", "categoryId": "cat_groceries", "name": "Local Market", "order": 2, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_butcher_fish", "categoryId": "cat_groceries", "name": "Butcher & Fish", "order": 3, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_bakery", "categoryId": "cat_groceries", "name": "Bakery", "order": 4, "isSystem": true, "isActive": true, "flowType": "Expense" }
+    ]
+  },
+  {
+    "id": "cat_restaurants",
+    "name": "Restaurants & Cafes",
+    "type": "expense",
+    "order": 3,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_restaurants", "categoryId": "cat_restaurants", "name": "Restaurants", "order": 1, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_cafes", "categoryId": "cat_restaurants", "name": "Cafes", "order": 2, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_take_away", "categoryId": "cat_restaurants", "name": "Take-away", "order": 3, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_delivery", "categoryId": "cat_restaurants", "name": "Delivery", "order": 4, "isSystem": true, "isActive": true, "flowType": "Expense" }
+    ]
+  },
+  {
+    "id": "cat_transport",
+    "name": "Transport",
+    "type": "expense",
+    "order": 4,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_fuel", "categoryId": "cat_transport", "name": "Fuel", "order": 1, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_public_transport", "categoryId": "cat_transport", "name": "Public Transport", "order": 2, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_taxi", "categoryId": "cat_transport", "name": "Taxi & Ride-hailing", "order": 3, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_car_repairs", "categoryId": "cat_transport", "name": "Car Repairs", "order": 4, "isSystem": true, "isActive": true, "flowType": "Expense" }
+    ]
+  },
+  {
+    "id": "cat_shopping",
+    "name": "Shopping & Personal",
+    "type": "expense",
+    "order": 5,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_clothing", "categoryId": "cat_shopping", "name": "Clothing & Shoes", "order": 1, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_home_diy", "categoryId": "cat_shopping", "name": "Home & DIY", "order": 2, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_electronics", "categoryId": "cat_shopping", "name": "Electronics", "order": 3, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_gifts", "categoryId": "cat_shopping", "name": "Gifts", "order": 4, "isSystem": true, "isActive": true, "flowType": "Expense" }
+    ]
+  },
+  {
+    "id": "cat_subscriptions",
+    "name": "Subscriptions & Services",
+    "type": "expense",
+    "order": 6,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_streaming", "categoryId": "cat_subscriptions", "name": "Streaming", "order": 1, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_music", "categoryId": "cat_subscriptions", "name": "Music", "order": 2, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_apps", "categoryId": "cat_subscriptions", "name": "Apps & Digital Services", "order": 3, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_telecom", "categoryId": "cat_subscriptions", "name": "Telecom", "order": 4, "isSystem": true, "isActive": true, "flowType": "Expense" }
+    ]
+  },
+  {
+    "id": "cat_education",
+    "name": "Education",
+    "type": "expense",
+    "order": 7,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_tuition", "categoryId": "cat_education", "name": "Tuition & Fees", "order": 1, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_books_courses", "categoryId": "cat_education", "name": "Books & Courses", "order": 2, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_student_supplies", "categoryId": "cat_education", "name": "Student Supplies", "order": 3, "isSystem": true, "isActive": true, "flowType": "Expense" }
+    ]
+  },
+  {
+    "id": "cat_health",
+    "name": "Health",
+    "type": "expense",
+    "order": 8,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_medical", "categoryId": "cat_health", "name": "Medical Expenses", "order": 1, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_prescriptions", "categoryId": "cat_health", "name": "Prescriptions", "order": 2, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_dental", "categoryId": "cat_health", "name": "Dental", "order": 3, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_eye_care", "categoryId": "cat_health", "name": "Eye Care", "order": 4, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_therapy", "categoryId": "cat_health", "name": "Therapy", "order": 5, "isSystem": true, "isActive": true, "flowType": "Expense" }
+    ]
+  },
+  {
+    "id": "cat_utilities",
+    "name": "Utilities",
+    "type": "expense",
+    "order": 9,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_electricity", "categoryId": "cat_utilities", "name": "Electricity", "order": 1, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_water", "categoryId": "cat_utilities", "name": "Water", "order": 2, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_gas", "categoryId": "cat_utilities", "name": "Gas", "order": 3, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_internet", "categoryId": "cat_utilities", "name": "Internet", "order": 4, "isSystem": true, "isActive": true, "flowType": "Expense" }
+    ]
+  },
+  {
+    "id": "cat_entertainment",
+    "name": "Entertainment",
+    "type": "expense",
+    "order": 10,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_movies_events", "categoryId": "cat_entertainment", "name": "Movies & Events", "order": 1, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_hobbies", "categoryId": "cat_entertainment", "name": "Hobbies", "order": 2, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_games", "categoryId": "cat_entertainment", "name": "Games", "order": 3, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_travel", "categoryId": "cat_entertainment", "name": "Travel & Holidays", "order": 4, "isSystem": true, "isActive": true, "flowType": "Expense" }
+    ]
+  },
+  {
+    "id": "cat_insurance",
+    "name": "Insurance",
+    "type": "expense",
+    "order": 11,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_health_ins", "categoryId": "cat_insurance", "name": "Health Insurance", "order": 1, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_car_ins", "categoryId": "cat_insurance", "name": "Car Insurance", "order": 2, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_home_ins", "categoryId": "cat_insurance", "name": "Home Insurance", "order": 3, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_life_ins", "categoryId": "cat_insurance", "name": "Life Insurance", "order": 4, "isSystem": true, "isActive": true, "flowType": "Expense" }
+    ]
+  },
+  {
+    "id": "cat_personal_care",
+    "name": "Personal Care",
+    "type": "expense",
+    "order": 12,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_haircut", "categoryId": "cat_personal_care", "name": "Haircut & Beauty", "order": 1, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_gym", "categoryId": "cat_personal_care", "name": "Gym & Fitness", "order": 2, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_spa", "categoryId": "cat_personal_care", "name": "Spa & Wellness", "order": 3, "isSystem": true, "isActive": true, "flowType": "Expense" }
+    ]
+  },
+  {
+    "id": "cat_childcare",
+    "name": "Childcare",
+    "type": "expense",
+    "order": 13,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_daycare", "categoryId": "cat_childcare", "name": "Daycare", "order": 1, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_babysitter", "categoryId": "cat_childcare", "name": "Babysitter", "order": 2, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_school_activities", "categoryId": "cat_childcare", "name": "School Activities", "order": 3, "isSystem": true, "isActive": true, "flowType": "Expense" }
+    ]
+  },
+  {
+    "id": "cat_pet_care",
+    "name": "Pet Care",
+    "type": "expense",
+    "order": 14,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_pet_food", "categoryId": "cat_pet_care", "name": "Pet Food", "order": 1, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_vet", "categoryId": "cat_pet_care", "name": "Vet", "order": 2, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_pet_grooming", "categoryId": "cat_pet_care", "name": "Pet Grooming", "order": 3, "isSystem": true, "isActive": true, "flowType": "Expense" }
+    ]
+  },
+  {
+    "id": "cat_gifts_donations",
+    "name": "Gifts & Donations",
+    "type": "expense",
+    "order": 15,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_gifts_giving", "categoryId": "cat_gifts_donations", "name": "Gifts", "order": 1, "isSystem": true, "isActive": true, "flowType": "Expense" },
+      { "id": "sub_charitable", "categoryId": "cat_gifts_donations", "name": "Charitable Giving", "order": 2, "isSystem": true, "isActive": true, "flowType": "Expense" }
+    ]
+  },
+  {
+    "id": "cat_income",
+    "name": "Salary & Income",
+    "type": "income",
+    "order": 16,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_salary", "categoryId": "cat_income", "name": "Monthly Salary", "order": 1, "isSystem": true, "isActive": true, "flowType": "Income" },
+      { "id": "sub_freelance", "categoryId": "cat_income", "name": "Freelance", "order": 2, "isSystem": true, "isActive": true, "flowType": "Income" },
+      { "id": "sub_investment_income", "categoryId": "cat_income", "name": "Investment Returns", "order": 3, "isSystem": true, "isActive": true, "flowType": "Income" },
+      { "id": "sub_other_income", "categoryId": "cat_income", "name": "Other Income", "order": 4, "isSystem": true, "isActive": true, "flowType": "Income" }
+    ]
+  },
+  {
+    "id": "cat_transfers",
+    "name": "Internal Transfers",
+    "type": "both",
+    "order": 17,
+    "isSystem": true,
+    "isActive": true,
+    "subcategories": [
+      { "id": "sub_transfers", "categoryId": "cat_transfers", "name": "Between Accounts", "order": 1, "isSystem": true, "isActive": true, "flowType": "Expense" }
+    ]
+  }
+]

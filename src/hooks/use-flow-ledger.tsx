@@ -1,113 +1,124 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import type { Account, Category, Subcategory, Transaction, Workspace, User } from '@/lib/types';
-import { getAccounts } from '@/lib/services/accounts';
-import { getCategories } from '@/lib/services/categories';
-import { getTransactions } from '@/lib/services/transactions';
-import { getWorkspaces } from '@/lib/services/workspaces';
-import { mockAuth } from '@/lib/services/auth';
+import type { Account, Category, Subcategory, Transaction, Workspace } from '@/lib/types';
+import {
+  apiGetWorkspaces,
+  apiGetAccounts,
+  apiGetTransactions,
+  apiGetCategories,
+} from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
+
+const DEFAULT_WORKSPACE_ID = 'ws1';
 
 interface FlowLedgerContextType {
-  user: User | null;
   workspaces: Workspace[];
-  workspaceId: string | null;
+  workspaceId: string;
   setWorkspaceId: (id: string) => void;
   accounts: Account[];
   transactions: Transaction[];
   categories: (Category & { subcategories: Subcategory[] })[];
+  isLoading: boolean;
   reloadWorkspaces: () => Promise<void>;
   reloadAccounts: () => Promise<void>;
   reloadTransactions: () => Promise<void>;
+  reloadCategories: () => Promise<void>;
 }
 
 const FlowLedgerContext = createContext<FlowLedgerContextType | undefined>(undefined);
 
 export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [workspaceId, setWorkspaceId] = useState<string>(DEFAULT_WORKSPACE_ID);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<(Category & { subcategories: Subcategory[] })[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const { toast } = useToast();
 
   const fetchWorkspaces = useCallback(async () => {
-    if (!user) return;
-    const userWorkspaces = await getWorkspaces(user.uid);
-    setWorkspaces(userWorkspaces);
-    if (userWorkspaces.length > 0 && !workspaceId) {
-      setWorkspaceId(userWorkspaces[0].id);
-    } else if (userWorkspaces.length === 0) {
-      setWorkspaceId(null);
+    try {
+      const data = await apiGetWorkspaces();
+      setWorkspaces(data);
+      if (data.length > 0 && !data.find((w) => w.id === workspaceId)) {
+        setWorkspaceId(data[0].id);
+      }
+    } catch (e) {
+      console.error('Failed to load workspaces:', e);
+      toast({ title: 'Failed to load workspaces', description: (e as Error).message, variant: 'destructive' });
     }
-  }, [user, workspaceId]);
-  
+  }, [workspaceId, toast]);
+
   const fetchAccounts = useCallback(async () => {
-    if (!workspaceId) {
-        setAccounts([]);
-        return;
-    };
-    const workspaceAccounts = await getAccounts(workspaceId);
-    setAccounts(workspaceAccounts);
-  }, [workspaceId]);
+    try {
+      const data = await apiGetAccounts(workspaceId);
+      setAccounts(data);
+    } catch (e) {
+      console.error('Failed to load accounts:', e);
+      toast({ title: 'Failed to load accounts', description: (e as Error).message, variant: 'destructive' });
+    }
+  }, [workspaceId, toast]);
 
   const fetchTransactions = useCallback(async () => {
-    if (!workspaceId) {
-        setTransactions([]);
-        return;
-    };
-    const workspaceTransactions = await getTransactions(workspaceId);
-    setTransactions(workspaceTransactions);
-  }, [workspaceId]);
+    try {
+      const data = await apiGetTransactions(workspaceId);
+      setTransactions(
+        data.map((t) => ({ ...t, date: new Date(t.date), valueDate: t.valueDate ? new Date(t.valueDate) : undefined }))
+      );
+    } catch (e) {
+      console.error('Failed to load transactions:', e);
+      toast({ title: 'Failed to load transactions', description: (e as Error).message, variant: 'destructive' });
+    }
+  }, [workspaceId, toast]);
 
   const fetchCategories = useCallback(async () => {
-    const systemCategories = await getCategories();
-    setCategories(systemCategories);
-  }, []);
-
-  // Initial data loading
-  useEffect(() => {
-    setUser(mockAuth.currentUser); // Simulate user login
-    fetchCategories();
-  }, [fetchCategories]);
-
-  useEffect(() => {
-    if (user) {
-        fetchWorkspaces();
+    try {
+      const data = await apiGetCategories();
+      setCategories(data);
+    } catch (e) {
+      console.error('Failed to load categories:', e);
+      toast({ title: 'Failed to load categories', description: (e as Error).message, variant: 'destructive' });
     }
-  }, [user, fetchWorkspaces]);
+  }, [toast]);
 
   useEffect(() => {
-    if (workspaceId) {
-        fetchAccounts();
-        fetchTransactions();
-    } else {
-        // If workspaceId is null (e.g., after creating the very first one), clear data
-        setAccounts([]);
-        setTransactions([]);
-    }
+    setIsLoading(true);
+    Promise.all([fetchWorkspaces(), fetchCategories()]).finally(() => {
+      // accounts/transactions load in the next effect; keep loading until those finish
+    });
+  }, [fetchWorkspaces, fetchCategories]);
+
+  useEffect(() => {
+    setIsLoading(true);
+    Promise.all([fetchAccounts(), fetchTransactions()]).finally(() => {
+      setIsLoading(false);
+    });
   }, [workspaceId, fetchAccounts, fetchTransactions]);
 
-  const value = {
-    user,
-    workspaces,
-    workspaceId,
-    setWorkspaceId,
-    accounts,
-    transactions,
-    categories,
-    reloadWorkspaces: fetchWorkspaces,
-    reloadAccounts: fetchAccounts,
-    reloadTransactions: fetchTransactions,
-  };
-
-  return <FlowLedgerContext.Provider value={value}>{children}</FlowLedgerContext.Provider>;
+  return (
+    <FlowLedgerContext.Provider
+      value={{
+        workspaces,
+        workspaceId,
+        setWorkspaceId,
+        accounts,
+        transactions,
+        categories,
+        isLoading,
+        reloadWorkspaces: fetchWorkspaces,
+        reloadAccounts: fetchAccounts,
+        reloadTransactions: fetchTransactions,
+        reloadCategories: fetchCategories,
+      }}
+    >
+      {children}
+    </FlowLedgerContext.Provider>
+  );
 };
 
 export const useFlowLedger = () => {
   const context = useContext(FlowLedgerContext);
-  if (context === undefined) {
-    throw new Error('useFlowLedger must be used within a FlowLedgerProvider');
-  }
+  if (!context) throw new Error('useFlowLedger must be used within a FlowLedgerProvider');
   return context;
 };

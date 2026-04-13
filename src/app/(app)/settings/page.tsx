@@ -1,6 +1,7 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ClassificationRulesTab } from '@/components/settings/classification-rules-tab';
+import { CategoriesPanel } from '@/components/settings/categories-panel';
 
 export default function SettingsPage() {
   return (
@@ -40,15 +41,7 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
         <TabsContent value="categories">
-          <Card>
-            <CardHeader>
-              <CardTitle>Categories</CardTitle>
-              <CardDescription>Manage your transaction categories.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p>Category management UI will be implemented here.</p>
-            </CardContent>
-          </Card>
+          <CategoriesPanel />
         </TabsContent>
         <TabsContent value="rules">
           <ClassificationRulesTab />

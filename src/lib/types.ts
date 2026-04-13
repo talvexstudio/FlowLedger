@@ -43,14 +43,31 @@ export type Transaction = {
   type: 'Expense' | 'Income' | 'InternalTransfer' | 'Adjustment';
   categoryId?: string;
   subcategoryId?: string;
+  importId?: string;
   needsReview: boolean;
   isInternalTransfer: boolean;
+  internalDirection?: 'Out' | 'In';
+  destinationAccountId?: string;
+  linkedTransactionId?: string;
   isPotentialDuplicate: boolean;
+  isPotentialTransfer?: boolean;
+  potentialTransferMatch?: any; // DuplicateMatch from duplicate-utils
   isInconsistent: boolean;
   sourceFileId?: string;
   sourceAccountName?: string;
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type ImportSession = {
+  id: string;
+  workspaceId: string;
+  accountId: string;
+  createdAt: Date;
+  fileName: string;
+  sourceType: "CSV" | "XLSX";
+  template: string;
+  transactionCount: number;
 };
 
 export type Category = {
@@ -60,6 +77,8 @@ export type Category = {
   type: 'expense' | 'income' | 'both';
   order: number;
   isSystem: boolean;
+  isActive?: boolean;
+  isCustom?: boolean;
 };
 
 export type Subcategory = {
@@ -69,30 +88,53 @@ export type Subcategory = {
   name: string;
   order: number;
   isSystem: boolean;
+  isActive?: boolean;
+  isCustom?: boolean;
+  flowType?: "Expense" | "Income";
 };
 
 export type ClassificationRule = {
   id: string;
   workspaceId: string;
-  priority: number;
-  matchField: "description" | "rawDescription" | "sourceAccountName";
-  matchType: "contains" | "startsWith" | "equals" | "regex";
-  matchValue: string;
-  matchAmountMin?: number;
-  matchAmountMax?: number;
-  assignType?: 'Expense' | 'Income' | 'InternalTransfer';
-  assignCategoryId: string;
-  assignSubcategoryId: string;
-  setInternalTransfer?: boolean;
-  setNeedsReview?: boolean;
-  active: boolean;
+  match: {
+    descriptionContains?: string;
+    accountId?: string;
+    minAmount?: number;
+    maxAmount?: number;
+  };
+  action: {
+    categoryId?: string;
+    subcategoryId?: string;
+    type?: Transaction["type"];
+  };
+  createdFromTransactionId?: string;
+  createdAt: Date;
 };
 
 export type ImportTemplate = {
   id: string;
+  workspaceId: string;
   name: string;
-  // This would be a more complex object defining mappings
-  mapping: any; 
+  description?: string;
+  sourceType: "CSV" | "XLSX";
+  headerSignature: string[];
+  mapping: {
+    dateField: string;
+    descriptionField: string;
+    rawDescriptionField?: string;
+    debitField?: string;
+    creditField?: string;
+    amountField?: string;
+    balanceField?: string;
+    dateFormat?: string;
+    amountOptions?: {
+      decimalSeparator?: "," | ".";
+      thousandsSeparator?: "," | ".";
+      alreadySigned?: boolean;
+    };
+  };
+  defaultAccountId?: string;
+  createdAt: Date;
 };
 
 export type Budget = {

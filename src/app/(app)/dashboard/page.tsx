@@ -4,6 +4,7 @@ import { KpiCard } from '@/components/dashboard/kpi-card';
 import { OverviewChart } from '@/components/dashboard/overview-chart';
 import { ExpensesChart } from '@/components/dashboard/expenses-chart';
 import { ReviewTransactions } from '@/components/dashboard/review-transactions';
+import { DashboardDateRangePicker, getDefaultDateRange, type DashboardDateRange } from '@/components/dashboard/date-range-picker';
 import { DollarSign, ArrowUp, ArrowDown, PiggyBank, Sparkles, TriangleAlert, BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,8 +21,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
-import { seedDemoData, clearWorkspaceData } from '@/lib/services/seed';
-import { buildMonthlyOverviewData, getLast30DaysRange, toDate } from '@/app/(app)/dashboard/utils';
+import { apiSeedDemoData } from '@/lib/api';
+import { buildRangeOverviewData, buildMonthlyOverviewData, toDate } from '@/app/(app)/dashboard/utils';
 
 export default function DashboardPage() {
   const { toast } = useToast();
@@ -34,6 +35,7 @@ export default function DashboardPage() {
   } = useFlowLedger();
 
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [dateRange, setDateRange] = useState<DashboardDateRange>(getDefaultDateRange);
 
   const loadDemoData = async () => {
     if (!workspaceId) {
@@ -45,7 +47,7 @@ export default function DashboardPage() {
       return;
     }
     try {
-      await seedDemoData(workspaceId);
+      await apiSeedDemoData(workspaceId, false);
       reloadAccounts();
       reloadTransactions();
       
@@ -76,8 +78,10 @@ export default function DashboardPage() {
 
     setShowConfirmDialog(false);
     try {
-      await clearWorkspaceData(workspaceId);
-      await loadDemoData();
+      await apiSeedDemoData(workspaceId, true);
+      reloadAccounts();
+      reloadTransactions();
+      toast({ title: 'Demo Data Loaded', description: 'Sample accounts and transactions have been added.' });
     } catch(error) {
         toast({
             variant: 'destructive',
@@ -87,18 +91,24 @@ export default function DashboardPage() {
     }
   };
 
-  const { income, expenses, net, savingsRate } = useMemo(() => {
-    const { start, end } = getLast30DaysRange();
-    const last30Days = transactions.filter((t) => {
-      const date = toDate(t.date);
-      return date ? date >= start && date <= end : false;
-    });
+  const effectiveTransactions = useMemo(
+    () => transactions.filter((t) => !t.needsReview),
+    [transactions]
+  );
 
-    const incomeTotal = last30Days
+  const rangeTransactions = useMemo(() => {
+    return effectiveTransactions.filter((t) => {
+      const date = toDate(t.date);
+      return date ? date >= dateRange.start && date <= dateRange.end : false;
+    });
+  }, [effectiveTransactions, dateRange]);
+
+  const { income, expenses, net, savingsRate } = useMemo(() => {
+    const incomeTotal = rangeTransactions
       .filter((t) => t.type === 'Income')
       .reduce((sum, t) => sum + t.amountBase, 0);
 
-    const expenseTotal = last30Days
+    const expenseTotal = rangeTransactions
       .filter((t) => t.type === 'Expense')
       .reduce((sum, t) => sum + Math.abs(t.amountBase), 0);
 
@@ -111,14 +121,17 @@ export default function DashboardPage() {
       net: netBalance,
       savingsRate: rate,
     };
-  }, [transactions]);
+  }, [rangeTransactions]);
 
-  const monthlyData = useMemo(() => buildMonthlyOverviewData(transactions), [transactions]);
+  const chartData = useMemo(
+    () => buildRangeOverviewData(effectiveTransactions, dateRange.start, dateRange.end),
+    [effectiveTransactions, dateRange]
+  );
 
   const { avgIncome, avgExpenses, periodSavingsRate } = useMemo(() => {
-    const monthsInWindow = monthlyData.length || 1;
-    const totalIncome = monthlyData.reduce((sum, month) => sum + month.income, 0);
-    const totalExpenses = monthlyData.reduce((sum, month) => sum + month.expenses, 0);
+    const monthsInWindow = chartData.length || 1;
+    const totalIncome = chartData.reduce((sum, month) => sum + month.income, 0);
+    const totalExpenses = chartData.reduce((sum, month) => sum + month.expenses, 0);
 
     const averageIncome = totalIncome / monthsInWindow;
     const averageExpenses = totalExpenses / monthsInWindow;
@@ -129,7 +142,7 @@ export default function DashboardPage() {
       avgExpenses: averageExpenses,
       periodSavingsRate: savingsRate,
     };
-  }, [monthlyData]);
+  }, [chartData]);
 
   const currencyFormatter = useMemo(() => {
     return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
@@ -144,7 +157,8 @@ export default function DashboardPage() {
   return (
     <>
       <div className="flex-1 space-y-4">
-        <div className="flex justify-end">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <DashboardDateRangePicker value={dateRange} onChange={setDateRange} />
           <Button onClick={handleLoadDemoClick} variant="outline">
             <Sparkles className="mr-2 h-4 w-4" />
             Load Demo Data
@@ -155,33 +169,33 @@ export default function DashboardPage() {
             title="Total Income"
             value={`€${income.toFixed(2)}`}
             icon={<ArrowUp className="h-4 w-4 text-muted-foreground" />}
-            description="Last 30 days"
+            description="Selected period"
           />
           <KpiCard
             title="Total Expenses"
             value={`€${expenses.toFixed(2)}`}
             icon={<ArrowDown className="h-4 w-4 text-muted-foreground" />}
-            description="Last 30 days"
+            description="Selected period"
           />
           <KpiCard
             title="Net Balance"
             value={`€${net.toFixed(2)}`}
             icon={<DollarSign className="h-4 w-4 text-muted-foreground" />}
-            description="Income - Expenses (last 30 days)"
+            description="Income minus expenses"
           />
           <KpiCard
             title="Savings Rate"
             value={`${savingsRate.toFixed(1)}%`}
             icon={<PiggyBank className="h-4 w-4 text-muted-foreground" />}
-            description="Net / Income (last 30 days)"
+            description="Net / Income"
           />
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Monthly Averages</CardTitle>
+              <CardTitle className="text-sm font-medium">Period Averages</CardTitle>
               <BarChart3 className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <p className="text-xs text-muted-foreground">Last 12 months</p>
+              <p className="text-xs text-muted-foreground">Per data point in selected range</p>
               <div className="mt-3 space-y-1 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Income</span>
@@ -201,10 +215,10 @@ export default function DashboardPage() {
         </div>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
           <div className="col-span-12 lg:col-span-4">
-            <OverviewChart data={monthlyData} />
+            <OverviewChart data={chartData} />
           </div>
           <div className="col-span-12 lg:col-span-3">
-            <ExpensesChart />
+            <ExpensesChart dateRange={dateRange} />
           </div>
         </div>
         <div className="grid gap-4">

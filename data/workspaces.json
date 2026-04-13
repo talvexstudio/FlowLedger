@@ -1,0 +1,10 @@
+[
+  {
+    "id": "ws1",
+    "name": "My Finances",
+    "baseCurrency": "EUR",
+    "ownerUserId": "local",
+    "createdAt": "2025-01-01T00:00:00.000Z",
+    "updatedAt": "2025-01-01T00:00:00.000Z"
+  }
+]

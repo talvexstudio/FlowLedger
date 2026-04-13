@@ -1,0 +1,289 @@
+[
+  {
+    "createdAt": "2026-04-12T20:18:28.220Z",
+    "match": {
+      "descriptionContains": "COMPRA 7991 Revolut 3734 Dublin IE",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_transfers",
+      "subcategoryId": "sub_transfers",
+      "type": "InternalTransfer"
+    },
+    "createdFromTransactionId": "tra_1776016085482_f3y31",
+    "workspaceId": "ws1",
+    "id": "rul_1776025108560_qbis6",
+    "updatedAt": "2026-04-12T20:18:28.560Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:19:29.492Z",
+    "match": {
+      "descriptionContains": "COMPRA 7991 CONTINENTE BOM DIA PORT CONTACTLESS",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_groceries",
+      "subcategoryId": "sub_supermarket",
+      "type": "Expense"
+    },
+    "createdFromTransactionId": "tra_1776016114725_ysp9u",
+    "workspaceId": "ws1",
+    "id": "rul_1776025170534_oaw4s",
+    "updatedAt": "2026-04-12T20:19:30.534Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:20:28.191Z",
+    "match": {
+      "descriptionContains": "COMPRA 8004 CONTINENTE 4464-503 S D CONTACTLESS",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_groceries",
+      "subcategoryId": "sub_supermarket",
+      "type": "Expense"
+    },
+    "createdFromTransactionId": "tra_1776016087843_jlyvz",
+    "workspaceId": "ws1",
+    "id": "rul_1776025230157_1bad7",
+    "updatedAt": "2026-04-12T20:20:30.157Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:21:36.643Z",
+    "match": {
+      "descriptionContains": "COMPRA 8004 ZU MATOSINHOS 4160-503  CONTACTLESS",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_groceries",
+      "subcategoryId": "sub_supermarket",
+      "type": "Expense"
+    },
+    "createdFromTransactionId": "tra_1776016088196_memb3",
+    "workspaceId": "ws1",
+    "id": "rul_1776025296983_5qlai",
+    "updatedAt": "2026-04-12T20:21:36.984Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:22:50.976Z",
+    "match": {
+      "descriptionContains": "LEV ATM 7991 BPI   Senhora da Ho Norte Shopping",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_transfers",
+      "subcategoryId": "sub_transfers",
+      "type": "InternalTransfer"
+    },
+    "createdFromTransactionId": "tra_1776016089310_88n6j",
+    "workspaceId": "ws1",
+    "id": "rul_1776025371733_g8hos",
+    "updatedAt": "2026-04-12T20:22:51.733Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:23:39.754Z",
+    "match": {
+      "descriptionContains": "COMPRA 7991 PINGO DOCE MATOSINHO MA CONTACTLESS",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_groceries",
+      "subcategoryId": "sub_supermarket",
+      "type": "Expense"
+    },
+    "createdFromTransactionId": "tra_1776016120016_i2e1s",
+    "workspaceId": "ws1",
+    "id": "rul_1776025420110_ej4tz",
+    "updatedAt": "2026-04-12T20:23:40.110Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:24:04.418Z",
+    "match": {
+      "descriptionContains": "PAG. 932435635 - NOS",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_subscriptions",
+      "subcategoryId": "sub_telecom",
+      "type": "Expense"
+    },
+    "createdFromTransactionId": "tra_1776016093083_ulhp0",
+    "workspaceId": "ws1",
+    "id": "rul_1776025445060_eibem",
+    "updatedAt": "2026-04-12T20:24:05.060Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:24:28.584Z",
+    "match": {
+      "descriptionContains": "COMPRA 7991 NATA SWEET NATA, LDA SE CONTACTLESS",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_restaurants",
+      "subcategoryId": "sub_cafes",
+      "type": "Expense"
+    },
+    "createdFromTransactionId": "tra_1776016106853_lkc8s",
+    "workspaceId": "ws1",
+    "id": "rul_1776025468930_cwcp4",
+    "updatedAt": "2026-04-12T20:24:28.930Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:24:44.544Z",
+    "match": {
+      "descriptionContains": "PAG. 919836025 - VODAFONE",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_subscriptions",
+      "subcategoryId": "sub_telecom",
+      "type": "Expense"
+    },
+    "createdFromTransactionId": "tra_1776016108459_7jfjs",
+    "workspaceId": "ws1",
+    "id": "rul_1776025485081_6qvf5",
+    "updatedAt": "2026-04-12T20:24:45.086Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:24:58.525Z",
+    "match": {
+      "descriptionContains": "COMPRA 7991 TIP 1862-9 PORTO",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_transport",
+      "subcategoryId": "sub_public_transport",
+      "type": "Expense"
+    },
+    "createdFromTransactionId": "tra_1776016108799_fvkbt",
+    "workspaceId": "ws1",
+    "id": "rul_1776025498850_dzsa2",
+    "updatedAt": "2026-04-12T20:24:58.850Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:25:50.343Z",
+    "match": {
+      "descriptionContains": "COMPRA 8004 CONFEITARIA RAINHA 1ARO CONTACTLESS",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_restaurants",
+      "subcategoryId": "sub_cafes",
+      "type": "Expense"
+    },
+    "createdFromTransactionId": "tra_1776016111238_sl9bu",
+    "workspaceId": "ws1",
+    "id": "rul_1776025551840_c65sm",
+    "updatedAt": "2026-04-12T20:25:51.840Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:26:16.914Z",
+    "match": {
+      "descriptionContains": "COMPRA 7991 LIDL AGRADECE PORTO PT  CONTACTLESS",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_groceries",
+      "subcategoryId": "sub_supermarket",
+      "type": "Expense"
+    },
+    "createdFromTransactionId": "tra_1776016110063_36w3a",
+    "workspaceId": "ws1",
+    "id": "rul_1776025577254_1ncs1",
+    "updatedAt": "2026-04-12T20:26:17.254Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:26:48.534Z",
+    "match": {
+      "descriptionContains": "TRF. P/O ENG BERNARDO RIBEIRO VASCONCELOS ALVE",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_income",
+      "type": "Income"
+    },
+    "createdFromTransactionId": "tra_1776016119396_lduhe",
+    "workspaceId": "ws1",
+    "id": "rul_1776025608889_8giir",
+    "updatedAt": "2026-04-12T20:26:48.889Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:27:09.787Z",
+    "match": {
+      "descriptionContains": "COMPRA 7991 MEU SUPER CAVADINHA ARO CONTACTLESS",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_groceries",
+      "subcategoryId": "sub_supermarket",
+      "type": "Expense"
+    },
+    "createdFromTransactionId": "tra_1776016117922_snjd3",
+    "workspaceId": "ws1",
+    "id": "rul_1776025630101_84yqj",
+    "updatedAt": "2026-04-12T20:27:10.101Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:27:45.534Z",
+    "match": {
+      "descriptionContains": "LEV ATM 8004 MG    MATOSINHOS    Pingo Doce-R B",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_transfers",
+      "subcategoryId": "sub_transfers",
+      "type": "InternalTransfer"
+    },
+    "createdFromTransactionId": "tra_1776016113687_t3w8s",
+    "workspaceId": "ws1",
+    "id": "rul_1776025665879_a5jav",
+    "updatedAt": "2026-04-12T20:27:45.879Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:28:08.466Z",
+    "match": {
+      "descriptionContains": "PAG BXVAL- 7991 VIAVERDE",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_transport",
+      "subcategoryId": "sub_fuel",
+      "type": "Expense"
+    },
+    "createdFromTransactionId": "tra_1776016114364_iwd4f",
+    "workspaceId": "ws1",
+    "id": "rul_1776025688781_9un4l",
+    "updatedAt": "2026-04-12T20:28:08.781Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:28:21.435Z",
+    "match": {
+      "descriptionContains": "COMPRA 7991 EST SERVICO REPSOL E0165 4540-515 S",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_transport",
+      "subcategoryId": "sub_fuel",
+      "type": "Expense"
+    },
+    "createdFromTransactionId": "tra_1776016117423_2jp9s",
+    "workspaceId": "ws1",
+    "id": "rul_1776025701795_m4uq8",
+    "updatedAt": "2026-04-12T20:28:21.795Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:28:37.104Z",
+    "match": {
+      "descriptionContains": "COMPRA 7991 CALICO - PORTO PORTO PT CONTACTLESS",
+      "accountId": "acc1"
+    },
+    "action": {
+      "categoryId": "cat_restaurants",
+      "subcategoryId": "sub_restaurants",
+      "type": "Expense"
+    },
+    "createdFromTransactionId": "tra_1776016121173_b5cyp",
+    "workspaceId": "ws1",
+    "id": "rul_1776025717665_gp3rj",
+    "updatedAt": "2026-04-12T20:28:37.665Z"
+  }
+]

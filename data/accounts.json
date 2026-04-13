@@ -1,0 +1,62 @@
+[
+  {
+    "createdAt": "2026-04-12T17:39:13.747Z",
+    "id": "acc1",
+    "name": "ActivoBank",
+    "type": "bank",
+    "currency": "EUR",
+    "institution": "ActivoBank",
+    "openingBalance": 0,
+    "archived": false,
+    "workspaceId": "ws1",
+    "updatedAt": "2026-04-12T20:14:12.025Z"
+  },
+  {
+    "createdAt": "2026-04-12T20:17:42.690Z",
+    "name": "Revolut",
+    "type": "fintech",
+    "currency": "EUR",
+    "institution": "Revolut",
+    "openingBalance": 0,
+    "workspaceId": "ws1",
+    "archived": false,
+    "updatedAt": "2026-04-13T09:42:03.306Z",
+    "id": "acc_1776025062691_y67e4"
+  },
+  {
+    "createdAt": "2026-04-12T20:22:22.708Z",
+    "name": "Cash",
+    "type": "cash",
+    "currency": "EUR",
+    "institution": "Cash",
+    "openingBalance": 1,
+    "workspaceId": "ws1",
+    "archived": false,
+    "updatedAt": "2026-04-13T10:01:12.608Z",
+    "id": "acc_1776025342709_v3034"
+  },
+  {
+    "createdAt": "2026-04-13T09:44:05.125Z",
+    "name": "Test Savings",
+    "type": "bank",
+    "currency": "EUR",
+    "institution": "whatever",
+    "openingBalance": 0,
+    "workspaceId": "ws1",
+    "archived": false,
+    "updatedAt": "2026-04-13T10:10:35.498Z",
+    "id": "acc_1776073445125_wyet6"
+  },
+  {
+    "createdAt": "2026-04-13T10:23:04.567Z",
+    "name": "Test Checking",
+    "type": "bank",
+    "currency": "EUR",
+    "institution": "Test Bank",
+    "openingBalance": 0,
+    "workspaceId": "ws1",
+    "archived": false,
+    "updatedAt": "2026-04-13T10:23:04.568Z",
+    "id": "acc_1776075784568_u0uks"
+  }
+]

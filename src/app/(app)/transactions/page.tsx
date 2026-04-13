@@ -3,20 +3,36 @@
 import { TransactionsDataTable } from "@/components/transactions/data-table";
 import { useFlowLedger } from "@/hooks/use-flow-ledger";
 import { TransactionFormSheet } from "@/components/transactions/transaction-form-sheet";
-import { useState } from "react";
-import type { Transaction } from "@/lib/types";
-import { confirmTransaction, deleteTransaction, saveTransaction } from "@/lib/services/transactions";
+import { useRef, useEffect, useState } from "react";
+import type { ClassificationRule, Transaction } from "@/lib/types";
+import {
+  apiSaveTransaction,
+  apiConfirmTransaction,
+  apiDeleteTransaction,
+  apiDeleteTransactions,
+  apiGetRules,
+  apiSaveRule,
+} from "@/lib/api";
+import {
+  applyRulesToTransaction,
+  applyRuleClassificationToTransaction,
+  ruleMatchesTransactionForBackfill,
+} from "@/lib/utils/rule-utils";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { PlusCircle } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { RuleBackfillPanel } from "@/components/transactions/rule-backfill-panel";
 
 
 export default function TransactionsPage() {
     const { toast } = useToast();
-    const { categories, accounts, reloadTransactions, workspaceId } = useFlowLedger();
+    const { categories, accounts, reloadTransactions, workspaceId, transactions } = useFlowLedger();
     const [sheetState, setSheetState] = useState<{ open: boolean; transaction: Partial<Transaction> | null }>({ open: false, transaction: null });
     const [deleteState, setDeleteState] = useState<{ open: boolean; transaction: Transaction | null }>({ open: false, transaction: null });
+    const [backfillCandidates, setBackfillCandidates] = useState<Transaction[]>([]);
+    const [pendingRule, setPendingRule] = useState<(ClassificationRule & { categoryName?: string; subcategoryName?: string }) | null>(null);
+    const backfillPanelRef = useRef<HTMLDivElement | null>(null);
     
     const handleNew = () => {
         setSheetState({ open: true, transaction: null });
@@ -33,7 +49,7 @@ export default function TransactionsPage() {
     const handleConfirmDelete = async () => {
         if (!workspaceId || !deleteState.transaction) return;
         try {
-            await deleteTransaction(workspaceId, deleteState.transaction.id);
+            await apiDeleteTransaction(workspaceId, deleteState.transaction.id);
             await reloadTransactions();
             toast({
               title: "Transaction Deleted",
@@ -54,19 +70,61 @@ export default function TransactionsPage() {
     const handleSave = async (updatedTransaction: Partial<Transaction>, createRule: boolean) => {
       if (!workspaceId) return;
         try {
-            await saveTransaction(workspaceId, updatedTransaction);
+            const rules = updatedTransaction.id ? [] : await apiGetRules(workspaceId);
+            const txToSave = updatedTransaction.id
+              ? updatedTransaction
+              : applyRulesToTransaction(updatedTransaction, rules);
+
+            const saved = await apiSaveTransaction(workspaceId, txToSave);
             await reloadTransactions();
             toast({
               title: `Transaction ${updatedTransaction.id ? 'Updated' : 'Created'}`,
               description: "Your changes have been saved.",
             });
             if (createRule) {
-              toast({
-                title: "Classification Rule Created",
-                description: "A new rule has been created for similar transactions.",
-              });
-              // In a real app, you would call the generateClassificationRule AI flow.
-              console.log('Creating classification rule for:', updatedTransaction);
+              const descriptionSource = saved.rawDescription || saved.description || "";
+              const descriptionToken = extractRuleTokenFromDescription(descriptionSource);
+
+              if (descriptionToken) {
+                const ruleData: Omit<ClassificationRule, "id"> = {
+                  workspaceId,
+                  match: {
+                    descriptionContains: descriptionToken,
+                    accountId: saved.accountId,
+                  },
+                  action: {
+                    categoryId: saved.categoryId,
+                    subcategoryId: saved.subcategoryId,
+                    type: saved.type,
+                  },
+                  createdFromTransactionId: saved.id,
+                  createdAt: new Date(),
+                };
+
+                const createdRule = await apiSaveRule(workspaceId, ruleData);
+                toast({
+                  title: "Classification Rule Created",
+                  description: "A new rule has been created for similar transactions.",
+                });
+
+                const candidates = transactions.filter(
+                  (tx) =>
+                    tx.id !== saved.id && ruleMatchesTransactionForBackfill(createdRule, tx)
+                );
+
+                if (candidates.length > 0) {
+                  const categoryName = categories.find((c) => c.id === createdRule.action.categoryId)?.name;
+                  const subcategoryName = categories
+                    .find((c) => c.id === createdRule.action.categoryId)
+                    ?.subcategories.find((s) => s.id === createdRule.action.subcategoryId)?.name;
+                  setPendingRule({ ...createdRule, categoryName, subcategoryName });
+                  setBackfillCandidates(candidates);
+                  toast({
+                    title: "Rule suggestions available",
+                    description: `We found ${candidates.length} similar transaction(s). Review and apply the rule above.`,
+                  });
+                }
+              }
             }
         } catch (error) {
             console.error(error);
@@ -80,10 +138,23 @@ export default function TransactionsPage() {
         }
     };
 
+    useEffect(() => {
+        if (pendingRule && backfillCandidates.length > 0 && backfillPanelRef.current) {
+            const element = backfillPanelRef.current;
+            const rect = element.getBoundingClientRect();
+            const absoluteTop = rect.top + window.scrollY;
+            const headerOffset = 96; // adjust if header height changes
+            window.scrollTo({
+                top: Math.max(absoluteTop - headerOffset, 0),
+                behavior: "smooth",
+            });
+        }
+    }, [pendingRule, backfillCandidates.length]);
+
     const handleConfirm = async (transaction: Transaction) => {
         if (!workspaceId || !transaction.id) return;
         try {
-            await confirmTransaction(workspaceId, transaction.id);
+            await apiConfirmTransaction(workspaceId, transaction.id);
             await reloadTransactions();
             toast({
                 title: 'Transaction Confirmed',
@@ -98,10 +169,73 @@ export default function TransactionsPage() {
             });
         }
     }
+
+    const handleBulkDelete = async (ids: string[]) => {
+        if (!workspaceId || ids.length === 0) return;
+        try {
+            await apiDeleteTransactions(workspaceId, ids);
+            await reloadTransactions();
+            toast({
+              title: 'Transactions Deleted',
+              description: `Deleted ${ids.length} transaction(s).`,
+            });
+        } catch (error) {
+            console.error(error);
+            toast({
+                variant: 'destructive',
+                title: 'Bulk delete failed',
+                description: 'Could not delete the selected transactions.',
+            });
+        }
+    }
+
+    const handleConfirmBackfill = async (selectedIds: string[]) => {
+        if (!workspaceId || !pendingRule) return;
+        const rule = pendingRule;
+        const candidates = backfillCandidates;
+
+        setBackfillCandidates([]);
+        setPendingRule(null);
+
+        try {
+            const selected = candidates.filter((tx) => selectedIds.includes(tx.id));
+            if (selected.length > 0) {
+                for (const tx of selected) {
+                    const patch = applyRuleClassificationToTransaction(tx, rule, categories);
+                    await apiSaveTransaction(workspaceId, patch);
+                }
+                await reloadTransactions();
+                toast({
+                  title: "Rule applied",
+                  description: `Applied classification to ${selected.length} transaction(s).`,
+                });
+            }
+        } catch (error) {
+            console.error(error);
+            toast({
+                variant: 'destructive',
+                title: 'Backfill failed',
+                description: 'Could not apply the rule to selected transactions.',
+            });
+        }
+    };
     
   return (
     <>
       <div className="space-y-6">
+        {pendingRule && backfillCandidates.length > 0 && (
+          <div ref={backfillPanelRef}>
+            <RuleBackfillPanel
+              rule={pendingRule}
+              transactions={backfillCandidates}
+              onApply={handleConfirmBackfill}
+              onCancel={() => {
+                setBackfillCandidates([]);
+                setPendingRule(null);
+              }}
+            />
+          </div>
+        )}
         <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h1 className="text-2xl font-bold tracking-tight">Transactions</h1>
@@ -112,7 +246,20 @@ export default function TransactionsPage() {
               New Transaction
             </Button>
         </div>
-        <TransactionsDataTable onEdit={handleEdit} onConfirm={handleConfirm} onDelete={handleDelete} />
+        <div className="mb-2 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block h-3 w-5 rounded-sm bg-muted" />
+            <span>
+              Greyed transactions are <span className="font-medium">pending review</span> and are <span className="font-medium">not included</span> in dashboard metrics until confirmed.
+            </span>
+          </span>
+        </div>
+        <TransactionsDataTable
+          onEdit={handleEdit}
+          onConfirm={handleConfirm}
+          onDelete={handleDelete}
+          onBulkDelete={handleBulkDelete}
+        />
       </div>
       <TransactionFormSheet 
         isOpen={sheetState.open}
@@ -122,7 +269,7 @@ export default function TransactionsPage() {
         categories={categories}
         accounts={accounts.filter(a => !a.archived)}
       />
-       <AlertDialog open={deleteState.open} onOpenChange={(open) => { if (!open) setDeleteState({ open: false, transaction: null })}}>
+      <AlertDialog open={deleteState.open} onOpenChange={(open) => { if (!open) setDeleteState({ open: false, transaction: null })}}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this transaction?</AlertDialogTitle>
@@ -141,3 +288,7 @@ export default function TransactionsPage() {
     </>
   );
 }
+
+const extractRuleTokenFromDescription = (description: string): string => {
+  return description.trim();
+};

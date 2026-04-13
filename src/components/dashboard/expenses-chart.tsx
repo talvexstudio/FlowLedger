@@ -11,7 +11,7 @@ import {
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { useMemo } from 'react';
 import { isWithinInterval } from 'date-fns';
-import { getLast30DaysRange, toDate } from '@/app/(app)/dashboard/utils';
+import { toDate } from '@/app/(app)/dashboard/utils';
 
 const CATEGORY_COLORS = [
   '#4F46E5',
@@ -23,16 +23,20 @@ const CATEGORY_COLORS = [
   '#A855F7',
 ];
 
-export function ExpensesChart() {
+interface ExpensesChartProps {
+  dateRange?: { start: Date; end: Date };
+}
+
+export function ExpensesChart({ dateRange }: ExpensesChartProps) {
   const { transactions, categories } = useFlowLedger();
 
   const { data, total } = useMemo(() => {
-    const { start, end } = getLast30DaysRange();
     const expenseData = transactions
-      .filter(t => t.type === 'Expense' && t.categoryId)
+      .filter(t => t.type === 'Expense' && t.categoryId && !t.needsReview)
       .filter(t => {
+        if (!dateRange) return true;
         const date = toDate(t.date);
-        return date ? isWithinInterval(date, { start, end }) : false;
+        return date ? isWithinInterval(date, { start: dateRange.start, end: dateRange.end }) : false;
       })
       .reduce((acc, t) => {
         const categoryId = t.categoryId!;
@@ -67,7 +71,7 @@ export function ExpensesChart() {
     <Card>
       <CardHeader>
         <CardTitle>Expenses by Category</CardTitle>
-        <CardDescription>Breakdown of spending in the last 30 days.</CardDescription>
+        <CardDescription>Breakdown of spending in the selected period.</CardDescription>
       </CardHeader>
       <CardContent className="h-80">
         {data.length > 0 ? (
@@ -116,7 +120,7 @@ export function ExpensesChart() {
           </ResponsiveContainer>
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground">
-            No expenses recorded in the last 30 days.
+            No expenses recorded in the selected period.
           </div>
         )}
       </CardContent>
