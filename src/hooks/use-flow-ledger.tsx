@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import type { Account, Category, Subcategory, Transaction, Workspace } from '@/lib/types';
 import {
   apiGetWorkspaces,
@@ -36,6 +36,8 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
   const [categories, setCategories] = useState<(Category & { subcategories: Subcategory[] })[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
 
   const fetchWorkspaces = useCallback(async () => {
     try {
@@ -46,9 +48,9 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
       }
     } catch (e) {
       console.error('Failed to load workspaces:', e);
-      toast({ title: 'Failed to load workspaces', description: (e as Error).message, variant: 'destructive' });
+      toastRef.current({ title: 'Failed to load workspaces', description: (e as Error).message, variant: 'destructive' });
     }
-  }, [workspaceId, toast]);
+  }, [workspaceId]);
 
   const fetchAccounts = useCallback(async () => {
     try {
@@ -56,9 +58,9 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
       setAccounts(data);
     } catch (e) {
       console.error('Failed to load accounts:', e);
-      toast({ title: 'Failed to load accounts', description: (e as Error).message, variant: 'destructive' });
+      toastRef.current({ title: 'Failed to load accounts', description: (e as Error).message, variant: 'destructive' });
     }
-  }, [workspaceId, toast]);
+  }, [workspaceId]);
 
   const fetchTransactions = useCallback(async () => {
     try {
@@ -68,9 +70,9 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
       );
     } catch (e) {
       console.error('Failed to load transactions:', e);
-      toast({ title: 'Failed to load transactions', description: (e as Error).message, variant: 'destructive' });
+      toastRef.current({ title: 'Failed to load transactions', description: (e as Error).message, variant: 'destructive' });
     }
-  }, [workspaceId, toast]);
+  }, [workspaceId]);
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -78,9 +80,9 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
       setCategories(data);
     } catch (e) {
       console.error('Failed to load categories:', e);
-      toast({ title: 'Failed to load categories', description: (e as Error).message, variant: 'destructive' });
+      toastRef.current({ title: 'Failed to load categories', description: (e as Error).message, variant: 'destructive' });
     }
-  }, [toast]);
+  }, []);
 
   useEffect(() => {
     setIsLoading(true);

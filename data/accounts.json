@@ -44,7 +44,7 @@
     "openingBalance": 0,
     "workspaceId": "ws1",
     "archived": false,
-    "updatedAt": "2026-04-13T10:47:39.994Z",
+    "updatedAt": "2026-04-13T11:04:31.959Z",
     "id": "acc_1776073445125_wyet6"
   },
   {
@@ -82,5 +82,17 @@
     "archived": false,
     "updatedAt": "2026-04-13T10:45:18.088Z",
     "id": "acc_1776077118088_iowob"
+  },
+  {
+    "createdAt": "2026-04-13T10:50:42.716Z",
+    "name": "Final Test",
+    "type": "bank",
+    "currency": "EUR",
+    "institution": "Test Bank",
+    "openingBalance": 0,
+    "workspaceId": "ws1",
+    "archived": false,
+    "updatedAt": "2026-04-13T10:50:42.716Z",
+    "id": "acc_1776077442716_b5e3u"
   }
 ]
