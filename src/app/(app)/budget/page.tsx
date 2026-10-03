@@ -9,6 +9,7 @@ import { BudgetLines } from '@/components/budget/budget-lines';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { useToast } from '@/hooks/use-toast';
 import { apiSaveBudgetLine, apiDeleteBudgetLine } from '@/lib/api';
+import { shiftBudgetMonth } from '@/lib/budget-navigation';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 const MONTH_NAMES = [
@@ -39,17 +40,15 @@ export default function BudgetPage() {
   }, [selectedYear]);
 
   const handlePrevMonth = () => {
-    setSelectedMonth(m => {
-      if (m === 0) { setSelectedYear(y => y - 1); return 11; }
-      return m - 1;
-    });
+    const previous = shiftBudgetMonth({ month: selectedMonth, year: selectedYear }, -1);
+    setSelectedMonth(previous.month);
+    setSelectedYear(previous.year);
   };
 
   const handleNextMonth = () => {
-    setSelectedMonth(m => {
-      if (m === 11) { setSelectedYear(y => y + 1); return 0; }
-      return m + 1;
-    });
+    const next = shiftBudgetMonth({ month: selectedMonth, year: selectedYear }, 1);
+    setSelectedMonth(next.month);
+    setSelectedYear(next.year);
   };
 
   const handleYearChange = useCallback((year: string) => {
