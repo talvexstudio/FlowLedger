@@ -320,8 +320,67 @@ Completed in this iteration:
 - Dashboard KPI and chart aggregation already exclude transfers semantically by filtering on `type === 'Income'` / `type === 'Expense'`
 - No dashboard code changes were required in this iteration
 
-### Remaining Phase 0 gap
-**Status:** Still open
+### Remaining Phase 0 gap (RESOLVED in Session 2026-04-29/30)
+**Status:** CLOSED
 
-- Account balances are still not transaction-derived
-- Account cards currently use mock/randomized balance display, so transfer/balance contract is not yet closed
+- Account balances are now transaction-derived
+- Account cards display calculated balance (opening balance + confirmed transactions)
+- Wired in accounts/page.tsx line 299: `balance={balanceByAccountId[account.id] ?? account.openingBalance ?? 0}`
+
+---
+
+## 11. Iteration update - 2026-04-29/30 (CURRENT)
+
+### Phase 2: Budget Management + Modal Freeze Fix
+**Status:** COMPLETE with 3 critical bug fixes
+
+#### Task 1: Balance Calculation Re-enabled
+- Re-enabled balance calculation for account displays
+- Calculation: `openingBalance + sum(confirmedTransactions where needsReview=false)`
+- Efficient O(a+t) via useMemo to prevent re-render on every change
+- Wire-up in accounts/page.tsx line 299
+
+#### Task 2: Transaction Modal Freeze Fixed
+- **Issue:** Radix UI Sheet animations blocked main thread on close
+- **Solution:** Replaced with custom modal (fixed div + overlay, instant transitions)
+- **File:** src/components/transactions/transaction-form-sheet.tsx
+- **Constraint:** Never revert to Radix UI Sheet for main forms
+
+#### Task 3: Budget Management Implemented
+Completed 7-layer feature stack:
+1. Firestore Service: src/lib/services/budgets.ts (CRUD operations)
+2. API Route: src/app/api/budgets/route.ts (GET/POST/DELETE)
+3. API Client: src/lib/api.ts (3 functions)
+4. Context: src/hooks/use-flow-ledger.tsx (budgetLines, budgetYear, reloadBudget)
+5. Components: src/components/budget/budget-lines.tsx (table + real calculations)
+6. Page: src/app/(app)/budget/page.tsx (month/year nav, edit modal)
+7. Sidebar: src/components/layout/sidebar.tsx (enabled Budget link)
+
+#### Critical Bug Fixes Applied
+1. **Year dropdown not showing navigated years** - Changed to dynamic computation
+2. **Budget save returning error** - Added missing subcategoryId field
+3. **Double rendering + sidebar lag** - Removed function ref from useEffect dependencies
+
+### Current Phase 2 Status
+
+#### Completed
+- ✅ Accounts Module - Create, edit, delete, archive, display balances
+- ✅ Transactions Module - Full CRUD with filtering, categorization, batch ops
+- ✅ Budget Management - Set monthly budgets, track spending, navigate months/years
+
+#### In Progress
+- 🔄 Budget QA Checklist - 3 fixes applied, needs full verification
+
+#### Not Started (Phase 2+)
+- ⏳ Categories Management - Add/edit/delete, localization, subcategories
+- ⏳ Workspace Features - Create, switch, settings
+- ⏳ Internal Transfers - Move money between accounts (depends on balance calc being solid)
+
+### Next Steps After Budget QA
+
+1. **Complete Budget QA** - Verify month navigation, save, delete, performance
+2. **Categories Module** - Full CRUD on categories and subcategories
+3. **Workspace Features** - Create/switch workspaces with proper scoping
+4. **Internal Transfers** - Now safe to implement with balance calc working
+5. **Profile/Settings** - User preferences
+6. **Import/Export** - CSV/PDF functionality

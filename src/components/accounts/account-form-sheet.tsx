@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, startTransition } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -75,8 +75,8 @@ export function AccountFormSheet({ isOpen, onOpenChange, account, onSave }: Acco
   const isSubmitting = form.formState.isSubmitting;
 
   return (
-    <Sheet open={isOpen} onOpenChange={onOpenChange}>
-      <SheetContent className="sm:max-w-lg">
+    <Sheet open={isOpen} onOpenChange={(open) => startTransition(() => onOpenChange(open))}>
+      <SheetContent className="sm:max-w-lg duration-200">
         <SheetHeader>
           <SheetTitle>{account ? 'Edit Account' : 'Add New Account'}</SheetTitle>
           <SheetDescription>
@@ -183,7 +183,7 @@ export function AccountFormSheet({ isOpen, onOpenChange, account, onSave }: Acco
               />
             </div>
             <SheetFooter className="pt-4">
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
+              <Button type="button" variant="outline" onClick={() => startTransition(() => onOpenChange(false))} disabled={isSubmitting}>
                 Cancel
               </Button>
               <Button type="submit" disabled={isSubmitting}>

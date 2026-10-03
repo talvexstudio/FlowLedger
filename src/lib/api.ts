@@ -3,6 +3,8 @@
 
 import type {
   Account,
+  Budget,
+  BudgetLine,
   Category,
   ClassificationRule,
   ImportSession,
@@ -102,6 +104,16 @@ export const apiFindMatchingTemplate = (workspaceId: string, headerSignature: st
   call<ImportTemplate | null>(
     `/api/import-templates?workspaceId=${workspaceId}&headers=${encodeURIComponent(JSON.stringify(headerSignature))}`
   );
+
+// ─── Budgets ────────────────────────────────────────────────────────────────
+export const apiGetBudget = (workspaceId: string, year: number) =>
+  call<{ budget: Budget | null; lines: BudgetLine[] }>(`/api/budgets?workspaceId=${workspaceId}&year=${year}`);
+
+export const apiSaveBudgetLine = (workspaceId: string, year: number, line: Partial<BudgetLine>) =>
+  call<BudgetLine>('/api/budgets', { method: 'POST', body: JSON.stringify({ workspaceId, year, line }) });
+
+export const apiDeleteBudgetLine = (workspaceId: string, year: number, categoryId: string) =>
+  call<{ ok: true }>('/api/budgets', { method: 'DELETE', body: JSON.stringify({ workspaceId, year, categoryId }) });
 
 // ─── Seed / Demo Data ──────────────────────────────────────────────────────
 export const apiSeedDemoData = (workspaceId: string, clear = false) =>

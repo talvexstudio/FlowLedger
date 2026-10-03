@@ -6,15 +6,6 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Button } from '@/components/ui/button';
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-  SheetFooter,
-  SheetClose,
-} from '@/components/ui/sheet';
-import {
   Form,
   FormControl,
   FormDescription,
@@ -177,16 +168,17 @@ export function TransactionFormSheet({
   }
 
   return (
-    <Sheet open={isOpen} onOpenChange={onOpenChange}>
-      <SheetContent className="sm:max-w-lg">
-        <SheetHeader>
-          <SheetTitle>{isEditing ? 'Edit Transaction' : 'New Transaction'}</SheetTitle>
-          <SheetDescription>
-            {isEditing ? 'Update the details for this transaction.' : 'Enter the details for your new transaction.'}
-          </SheetDescription>
-        </SheetHeader>
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 pt-6">
+    isOpen && (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <div className="mb-6">
+            <h2 className="text-lg font-semibold">{isEditing ? 'Edit Transaction' : 'New Transaction'}</h2>
+            <p className="text-sm text-gray-600 mt-1">
+              {isEditing ? 'Update the details for this transaction.' : 'Enter the details for your new transaction.'}
+            </p>
+          </div>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
             
             <FormField
               control={form.control}
@@ -440,17 +432,16 @@ export function TransactionFormSheet({
               )}
             />)}
 
-            <SheetFooter className="pt-4">
-              <SheetClose asChild>
-                <Button type="button" variant="outline">
-                  Cancel
-                </Button>
-              </SheetClose>
+            <div className="flex gap-2 justify-end mt-8 pt-4 border-t">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
               <Button type="submit">Save Changes</Button>
-            </SheetFooter>
-          </form>
-        </Form>
-      </SheetContent>
-    </Sheet>
+            </div>
+            </form>
+          </Form>
+        </div>
+      </div>
+    )
   );
 }

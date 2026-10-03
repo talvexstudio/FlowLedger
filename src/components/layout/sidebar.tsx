@@ -26,7 +26,7 @@ const menuItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/accounts', label: 'Accounts', icon: Wallet },
   { href: '/transactions', label: 'Transactions', icon: ArrowRightLeft },
-  { href: '/budget', label: 'Budget', icon: PieChart, disabled: true },
+  { href: '/budget', label: 'Budget', icon: PieChart },
   { href: '/import', label: 'Import', icon: Upload },
 ];
 

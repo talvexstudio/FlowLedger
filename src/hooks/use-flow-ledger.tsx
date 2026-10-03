@@ -1,12 +1,13 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
-import type { Account, Category, Subcategory, Transaction, Workspace } from '@/lib/types';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode, useMemo } from 'react';
+import type { Account, BudgetLine, Category, Subcategory, Transaction, Workspace } from '@/lib/types';
 import {
   apiGetWorkspaces,
   apiGetAccounts,
   apiGetTransactions,
   apiGetCategories,
+  apiGetBudget,
 } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -19,11 +20,14 @@ interface FlowLedgerContextType {
   accounts: Account[];
   transactions: Transaction[];
   categories: (Category & { subcategories: Subcategory[] })[];
+  budgetLines: BudgetLine[];
+  budgetYear: number;
   isLoading: boolean;
   reloadWorkspaces: () => Promise<void>;
   reloadAccounts: () => Promise<void>;
   reloadTransactions: () => Promise<void>;
   reloadCategories: () => Promise<void>;
+  reloadBudget: (year?: number) => Promise<void>;
 }
 
 const FlowLedgerContext = createContext<FlowLedgerContextType | undefined>(undefined);
@@ -34,6 +38,8 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<(Category & { subcategories: Subcategory[] })[]>([]);
+  const [budgetLines, setBudgetLines] = useState<BudgetLine[]>([]);
+  const [budgetYear, setBudgetYear] = useState<number>(new Date().getFullYear());
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
   const toastRef = useRef(toast);
@@ -84,36 +90,51 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
+  const fetchBudget = useCallback(async (year?: number) => {
+    const targetYear = year ?? budgetYear;
+    if (year && year !== budgetYear) setBudgetYear(year);
+    try {
+      const { lines } = await apiGetBudget(workspaceId, targetYear);
+      setBudgetLines(lines);
+    } catch (e) {
+      console.error('Failed to load budget:', e);
+    }
+  }, [workspaceId, budgetYear]);
+
+  // Only run on mount and when workspaceId changes
   useEffect(() => {
     setIsLoading(true);
-    Promise.all([fetchWorkspaces(), fetchCategories()]).finally(() => {
+    fetchWorkspaces().then(() => fetchCategories()).finally(() => {
       // accounts/transactions load in the next effect; keep loading until those finish
     });
-  }, [fetchWorkspaces, fetchCategories]);
+  }, []); // Only on mount
 
   useEffect(() => {
     setIsLoading(true);
-    Promise.all([fetchAccounts(), fetchTransactions()]).finally(() => {
+    Promise.all([fetchAccounts(), fetchTransactions(), fetchBudget()]).finally(() => {
       setIsLoading(false);
     });
-  }, [workspaceId, fetchAccounts, fetchTransactions]);
+  }, [workspaceId]); // Only when workspace changes
+
+  const contextValue = useMemo(() => ({
+    workspaces,
+    workspaceId,
+    setWorkspaceId,
+    accounts,
+    transactions,
+    categories,
+    budgetLines,
+    budgetYear,
+    isLoading,
+    reloadWorkspaces: fetchWorkspaces,
+    reloadAccounts: fetchAccounts,
+    reloadTransactions: fetchTransactions,
+    reloadCategories: fetchCategories,
+    reloadBudget: fetchBudget,
+  }), [workspaces, workspaceId, accounts, transactions, categories, budgetLines, budgetYear, isLoading]);
 
   return (
-    <FlowLedgerContext.Provider
-      value={{
-        workspaces,
-        workspaceId,
-        setWorkspaceId,
-        accounts,
-        transactions,
-        categories,
-        isLoading,
-        reloadWorkspaces: fetchWorkspaces,
-        reloadAccounts: fetchAccounts,
-        reloadTransactions: fetchTransactions,
-        reloadCategories: fetchCategories,
-      }}
-    >
+    <FlowLedgerContext.Provider value={contextValue}>
       {children}
     </FlowLedgerContext.Provider>
   );
