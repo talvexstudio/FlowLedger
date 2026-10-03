@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Button } from '@/components/ui/button';
@@ -25,6 +25,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import type { Transaction, Category, Subcategory, Account } from '@/lib/types';
 import { TransactionFormValues, transactionSchema } from '@/lib/schemas';
+import { getSelectableOptions, getTransactionEditHydrationPatch } from '@/lib/transaction-form-hydration';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { format } from 'date-fns';
 
@@ -61,41 +62,91 @@ export function TransactionFormSheet({
   });
 
   const isEditing = !!transaction?.id;
+  const hydratedFormKeyRef = useRef<string | null>(null);
+  const [renderedFormKey, setRenderedFormKey] = useState<string | null>(null);
+  const formKey = isOpen ? transaction?.id ?? 'new' : null;
 
   useEffect(() => {
-    if (isOpen) {
-        if (transaction) {
-          form.reset({
-            ...transaction,
-            type: transaction.type ?? 'Expense',
-            amountBase: Math.abs(transaction.amountBase || 0), // Edit absolute value
-            date: transaction.date ? new Date(transaction.date) : new Date(),
-            internalDirection:
-              transaction.type === 'InternalTransfer'
-                ? (transaction.amountBase ?? 0) < 0
-                  ? 'Out'
-                  : 'In'
-                : undefined,
-            createRule: false,
-          });
-        } else {
-          form.reset({
-            accountId: accounts[0]?.id || '',
-            date: new Date(),
-            description: '',
-            amountBase: 0,
-            type: 'Expense',
-            categoryId: undefined,
-            subcategoryId: undefined,
-            internalDirection: undefined,
-            createRule: false,
-          });
-        }
+    if (!isOpen) {
+      hydratedFormKeyRef.current = null;
+      setRenderedFormKey(null);
+      return;
     }
-  }, [transaction, isOpen, form, accounts]);
+
+    if (hydratedFormKeyRef.current === formKey) return;
+    hydratedFormKeyRef.current = formKey;
+
+    if (transaction) {
+      const resetPayload: TransactionFormValues = {
+        id: transaction.id,
+        accountId: transaction.accountId ?? '',
+        date: transaction.date ? new Date(transaction.date) : new Date(),
+        description: transaction.description ?? '',
+        amountBase: Math.abs(transaction.amountBase || 0),
+        type: transaction.type ?? 'Expense',
+        internalDirection:
+          transaction.type === 'InternalTransfer'
+            ? (transaction.amountBase ?? 0) < 0
+              ? 'Out'
+              : 'In'
+            : undefined,
+        destinationAccountId: transaction.destinationAccountId,
+        categoryId: transaction.categoryId,
+        subcategoryId: transaction.subcategoryId,
+        createRule: false,
+      };
+      form.reset(resetPayload);
+    } else {
+      form.reset({
+        accountId: '',
+        date: new Date(),
+        description: '',
+        amountBase: 0,
+        type: 'Expense',
+        categoryId: undefined,
+        subcategoryId: undefined,
+        internalDirection: undefined,
+        createRule: false,
+      });
+    }
+    setRenderedFormKey(formKey);
+  }, [formKey, form, isOpen, transaction]);
+
+  useEffect(() => {
+    if (!isOpen || transaction || accounts.length === 0) return;
+    if (!form.getValues('accountId')) {
+      form.setValue('accountId', accounts[0].id);
+    }
+  }, [accounts, form, isOpen, transaction]);
 
   const selectedCategoryId = form.watch('categoryId');
   const selectedType = form.watch('type');
+  const selectedAccountId = form.watch('accountId');
+  const selectedSubcategoryId = form.watch('subcategoryId');
+
+  useEffect(() => {
+    if (!isOpen || !transaction?.id) return;
+
+    const patch = getTransactionEditHydrationPatch({
+      transaction,
+      accounts,
+      categories,
+      current: {
+        accountId: selectedAccountId,
+        categoryId: selectedCategoryId,
+        subcategoryId: selectedSubcategoryId,
+      },
+      dirty: {
+        accountId: form.getFieldState('accountId').isDirty,
+        categoryId: form.getFieldState('categoryId').isDirty,
+        subcategoryId: form.getFieldState('subcategoryId').isDirty,
+      },
+    });
+
+    if (patch.accountId) form.setValue('accountId', patch.accountId);
+    if (patch.categoryId) form.setValue('categoryId', patch.categoryId);
+    if (patch.subcategoryId) form.setValue('subcategoryId', patch.subcategoryId);
+  }, [accounts, categories, form, isOpen, selectedAccountId, selectedCategoryId, selectedSubcategoryId, transaction]);
 
   useEffect(() => {
     if (selectedType === 'InternalTransfer') {
@@ -112,15 +163,15 @@ export function TransactionFormSheet({
   }, [selectedType, form]);
 
   const activeCategories = useMemo(
-    () => categories.filter(category => category.isActive !== false),
-    [categories]
+    () => getSelectableOptions(categories, selectedCategoryId),
+    [categories, selectedCategoryId]
   );
 
   const subcategories = useMemo(() => {
     if (!selectedCategoryId) return [];
     const category = categories.find((c) => c.id === selectedCategoryId);
-    return (category?.subcategories || []).filter(sub => sub.isActive !== false);
-  }, [selectedCategoryId, categories]);
+    return getSelectableOptions(category?.subcategories || [], selectedSubcategoryId);
+  }, [selectedCategoryId, selectedSubcategoryId, categories]);
 
   const onSubmit = (data: TransactionFormValues) => {
     const rawAmount = data.amountBase ?? 0;
@@ -153,32 +204,34 @@ export function TransactionFormSheet({
   };
   
   const handleCategoryChange = (categoryId: string) => {
-    form.setValue('categoryId', categoryId);
-    form.setValue('subcategoryId', undefined);
+    form.setValue('categoryId', categoryId, { shouldDirty: true });
+    form.setValue('subcategoryId', undefined, { shouldDirty: true });
   }
 
   const handleSubcategoryChange = (subcategoryId: string) => {
-    form.setValue('subcategoryId', subcategoryId);
+    form.setValue('subcategoryId', subcategoryId, { shouldDirty: true });
     const categoryId = form.getValues('categoryId');
     const category = categories.find((cat) => cat.id === categoryId);
     const subcategory = category?.subcategories?.find((sub) => sub.id === subcategoryId);
     if (subcategory?.flowType) {
-      form.setValue('type', subcategory.flowType);
+      form.setValue('type', subcategory.flowType, { shouldDirty: true });
     }
   }
 
+  if (!isOpen || renderedFormKey !== formKey) return null;
+
   return (
-    isOpen && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
-          <div className="mb-6">
+        <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4 h-[90vh] max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden">
+          <div className="mb-6 shrink-0">
             <h2 className="text-lg font-semibold">{isEditing ? 'Edit Transaction' : 'New Transaction'}</h2>
             <p className="text-sm text-gray-600 mt-1">
               {isEditing ? 'Update the details for this transaction.' : 'Enter the details for your new transaction.'}
             </p>
           </div>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            <form onSubmit={form.handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 space-y-6">
             
             <FormField
               control={form.control}
@@ -186,7 +239,11 @@ export function TransactionFormSheet({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Account</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value} disabled={isEditing}>
+                  <Select
+                    onValueChange={field.onChange}
+                    value={field.value ?? ''}
+                    disabled={isEditing && transaction?.type === 'InternalTransfer'}
+                  >
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select an account" />
@@ -365,7 +422,7 @@ export function TransactionFormSheet({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Category</FormLabel>
-                  <Select onValueChange={handleCategoryChange} value={field.value} key={`cat-${categories.length}`}>
+                    <Select onValueChange={handleCategoryChange} value={field.value ?? ''}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select a category" />
@@ -391,7 +448,7 @@ export function TransactionFormSheet({
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Subcategory</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value} key={`sub-${selectedCategoryId}-${subcategories.length}`}>
+                      <Select onValueChange={handleSubcategoryChange} value={field.value ?? ''}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select a subcategory" />
@@ -411,7 +468,7 @@ export function TransactionFormSheet({
               />
             )}
 
-           {isEditing && (<FormField
+            {isEditing && (<FormField
               control={form.control}
               name="createRule"
               render={({ field }) => (
@@ -432,7 +489,9 @@ export function TransactionFormSheet({
               )}
             />)}
 
-            <div className="flex gap-2 justify-end mt-8 pt-4 border-t">
+            </div>
+
+            <div className="flex shrink-0 gap-2 justify-end mt-8 pt-4 border-t bg-white">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
@@ -442,6 +501,5 @@ export function TransactionFormSheet({
           </Form>
         </div>
       </div>
-    )
   );
 }

@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { apiSaveCategory, apiSaveSubcategory } from '@/lib/api';
+import { getCategoryChangeSet } from '@/lib/settings-change-sets';
 import type { Category, Subcategory } from '@/lib/types';
 
 type EditableCategory = Category & { subcategories: Subcategory[] };
@@ -38,6 +39,7 @@ export function CategoriesPanel() {
   const [newCategoryName, setNewCategoryName] = React.useState('');
   const [newCategoryType, setNewCategoryType] = React.useState<'expense' | 'income' | 'both'>('expense');
   const [isAddingCategory, setIsAddingCategory] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState(false);
 
   React.useEffect(() => {
     setEditableCategories(normalizeCategories(categories as EditableCategory[]));
@@ -158,18 +160,23 @@ export function CategoriesPanel() {
   };
 
   const handleSaveAll = async () => {
+    const baseline = normalizeCategories(categories as EditableCategory[]);
+    const changes = getCategoryChangeSet(editableCategories, baseline);
+    const requestCount = changes.categories.length + changes.subcategories.length;
+    setIsSaving(true);
     try {
-      for (const category of editableCategories) {
-        const { subcategories, ...categoryData } = category;
-        await apiSaveCategory(categoryData);
-        for (const subcategory of subcategories) {
-          await apiSaveSubcategory(category.id, subcategory);
-        }
+      for (const category of changes.categories) {
+        await apiSaveCategory(category);
+      }
+      for (const subcategory of changes.subcategories) {
+        await apiSaveSubcategory(subcategory.categoryId, subcategory.data);
       }
       await reloadCategories();
       toast({
         title: 'Categories updated',
-        description: 'Your category changes have been saved.',
+        description: requestCount > 0
+          ? 'Your category changes have been saved.'
+          : 'No category changes to save.',
       });
     } catch (error) {
       console.error(error);
@@ -178,6 +185,8 @@ export function CategoriesPanel() {
         title: 'Save failed',
         description: 'Could not update categories. Please try again.',
       });
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -340,7 +349,9 @@ export function CategoriesPanel() {
           </div>
         )}
         <div className="mt-4 flex justify-end">
-          <Button onClick={handleSaveAll}>Save changes</Button>
+          <Button onClick={handleSaveAll} disabled={isSaving}>
+            {isSaving ? 'Saving...' : 'Save changes'}
+          </Button>
         </div>
       </CardContent>
     </Card>

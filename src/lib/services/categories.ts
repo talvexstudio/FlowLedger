@@ -20,7 +20,7 @@ export const getCategories = async (): Promise<(Category & { subcategories: Subc
     const snapshot = await db.collection("categories").get();
     return snapshot.docs.map(doc => {
         const data = doc.data() as Category & { subcategories?: Subcategory[] };
-        return normalizeCategory({ id: doc.id, ...data });
+        return normalizeCategory({ ...data, id: doc.id });
     });
 }
 
@@ -53,18 +53,19 @@ export const saveSubcategory = async (
         throw new Error("Category not found.");
     }
 
+    const normalizedSubcategory = { ...subcategory, categoryId };
     const subs = [...(catData.subcategories || [])];
-    const existingIndex = subcategory.id
-        ? subs.findIndex(s => s.id === subcategory.id)
+    const existingIndex = normalizedSubcategory.id
+        ? subs.findIndex(s => s.id === normalizedSubcategory.id)
         : -1;
 
     if (existingIndex >= 0) {
-        subs[existingIndex] = subcategory;
+        subs[existingIndex] = normalizedSubcategory;
     } else {
-        const newId = subcategory.id && !subcategory.id.startsWith("temp-")
-            ? subcategory.id
+        const newId = normalizedSubcategory.id && !normalizedSubcategory.id.startsWith("temp-")
+            ? normalizedSubcategory.id
             : generateSubcategoryId();
-        subs.push({ ...subcategory, id: newId });
+        subs.push({ ...normalizedSubcategory, id: newId });
     }
 
     await coll.doc(categoryId).set(
@@ -75,5 +76,5 @@ export const saveSubcategory = async (
         { merge: true }
     );
 
-    return subcategory;
+    return normalizedSubcategory;
 }

@@ -67,18 +67,29 @@ export const apiDeleteTransactionsByImport = (workspaceId: string, importId: str
 export const apiGetCategories = () =>
   call<(Category & { subcategories: Subcategory[] })[]>('/api/categories');
 
+export const buildCategorySaveRequest = (data: Category) => ({
+  entity: 'category' as const,
+  data,
+});
+
+export const buildSubcategorySaveRequest = (categoryId: string, data: Subcategory) => ({
+  entity: 'subcategory' as const,
+  categoryId,
+  data: { ...data, categoryId },
+});
+
 export const apiSaveCategory = (data: Category) =>
-  call<Category>('/api/categories', { method: 'POST', body: JSON.stringify(data) });
+  call<Category>('/api/categories', { method: 'POST', body: JSON.stringify(buildCategorySaveRequest(data)) });
 
 export const apiSaveSubcategory = (categoryId: string, data: Subcategory) =>
-  call<Subcategory>('/api/categories', { method: 'POST', body: JSON.stringify({ type: 'subcategory', categoryId, ...data }) });
+  call<Subcategory>('/api/categories', { method: 'POST', body: JSON.stringify(buildSubcategorySaveRequest(categoryId, data)) });
 
 // ─── Rules ─────────────────────────────────────────────────────────────────
 export const apiGetRules = (workspaceId: string) =>
   call<ClassificationRule[]>(`/api/rules?workspaceId=${workspaceId}`);
 
 export const apiSaveRule = (workspaceId: string, data: ClassificationRule | Omit<ClassificationRule, 'id'>) =>
-  call<ClassificationRule>('/api/rules', { method: 'POST', body: JSON.stringify({ workspaceId, ...data }) });
+  call<ClassificationRule>('/api/rules', { method: 'POST', body: JSON.stringify({ ...data, workspaceId }) });
 
 export const apiDeleteRule = (workspaceId: string, id: string) =>
   call<{ ok: true }>('/api/rules', { method: 'DELETE', body: JSON.stringify({ workspaceId, id }) });

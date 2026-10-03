@@ -22,6 +22,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { apiDeleteRule, apiGetRules, apiSaveRule } from '@/lib/api';
+import { getChangedRules } from '@/lib/settings-change-sets';
 import type { ClassificationRule, Transaction } from '@/lib/types';
 
 const ANY_VALUE = '__any__';
@@ -31,6 +32,7 @@ export function ClassificationRulesTab() {
   const { workspaceId, accounts, categories } = useFlowLedger();
   const [editableRules, setEditableRules] = React.useState<ClassificationRule[]>([]);
   const [isSaving, setIsSaving] = React.useState(false);
+  const loadedRulesRef = React.useRef<ClassificationRule[]>([]);
 
   const loadRules = React.useCallback(async () => {
     if (!workspaceId) return;
@@ -41,6 +43,7 @@ export function ClassificationRulesTab() {
         match: rule.match ?? {},
         action: rule.action ?? {},
       }));
+      loadedRulesRef.current = normalized;
       setEditableRules(normalized);
     } catch (error) {
       console.error(error);
@@ -155,7 +158,7 @@ export function ClassificationRulesTab() {
     if (!workspaceId) return;
     setIsSaving(true);
     try {
-      for (const rule of editableRules) {
+      for (const rule of getChangedRules(editableRules, loadedRulesRef.current)) {
         await apiSaveRule(workspaceId, {
           ...rule,
           workspaceId: rule.workspaceId || workspaceId,
