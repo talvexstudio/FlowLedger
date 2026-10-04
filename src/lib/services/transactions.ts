@@ -30,6 +30,14 @@ export const getTransactions = async (workspaceId: string): Promise<Transaction[
     });
 }
 
+export const getTransaction = async (
+    workspaceId: string,
+    transactionId: string
+): Promise<Transaction | null> => {
+    const transactions = await getTransactions(workspaceId);
+    return transactions.find(transaction => transaction.id === transactionId) ?? null;
+}
+
 export const saveTransaction = async (workspaceId: string, transactionData: Partial<Transaction>) => {
     const normalizedData = normalizeAmountBase(transactionData);
     const coll = db.collection(transactionsCollection(workspaceId));

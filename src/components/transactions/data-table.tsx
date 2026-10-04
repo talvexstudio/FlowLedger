@@ -291,9 +291,21 @@ export function TransactionsDataTable({ onEdit, onConfirm, onDelete, onBulkDelet
                       <div className="flex flex-col gap-1">
                         <span>{t.description}</span>
                         {t.isPotentialDuplicate && (
-                          <Badge variant="outline" className="w-fit text-xs border-orange-400 text-orange-600">
-                            Potential duplicate
-                          </Badge>
+                          <>
+                            <Badge variant="outline" className="w-fit text-xs border-orange-400 text-orange-600">
+                              Potential duplicate
+                            </Badge>
+                            {t.potentialDuplicateMatch && (
+                              <span className="text-xs font-normal text-muted-foreground">
+                                Matches {new Date(t.potentialDuplicateMatch.date).toLocaleDateString()}
+                                {' · '}{t.potentialDuplicateMatch.description}
+                                {' · '}{new Intl.NumberFormat('de-DE', {
+                                  style: 'currency',
+                                  currency: 'EUR',
+                                }).format(t.potentialDuplicateMatch.amountBase)}
+                              </span>
+                            )}
+                          </>
                         )}
                         {t.isPotentialTransfer && (
                           <Button
@@ -327,7 +339,7 @@ export function TransactionsDataTable({ onEdit, onConfirm, onDelete, onBulkDelet
                                 </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                                {t.needsReview && (
+                                {t.needsReview && !t.isPotentialDuplicate && (
                                     <DropdownMenuItem onClick={() => { setOpenMenuId(null); onConfirm(t); }}>
                                         <Check className="mr-2 h-4 w-4 text-green-500" />
                                         Confirm

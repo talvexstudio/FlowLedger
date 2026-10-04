@@ -23,11 +23,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import type { Transaction, Category, Subcategory, Account } from '@/lib/types';
 import { TransactionFormValues, transactionSchema } from '@/lib/schemas';
 import { getSelectableOptions, getTransactionEditHydrationPatch } from '@/lib/transaction-form-hydration';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { format } from 'date-fns';
+import { TriangleAlert } from 'lucide-react';
 
 interface TransactionFormSheetProps {
   isOpen: boolean;
@@ -198,6 +200,9 @@ export function TransactionFormSheet({
       amountOriginal: signedAmount, // simplifying for now
       currencyOriginal: 'EUR',
       needsReview: false,
+      ...(transaction?.isPotentialDuplicate
+        ? { isPotentialDuplicate: false, potentialDuplicateMatch: null }
+        : {}),
       ...(internalDirection ? { internalDirection } : {}),
     };
     onSave(transactionToSave, createRule);
@@ -232,6 +237,29 @@ export function TransactionFormSheet({
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 space-y-6">
+
+            {isEditing && transaction?.isPotentialDuplicate && (
+              <Alert className="border-orange-400 bg-orange-50 text-orange-950">
+                <TriangleAlert className="h-4 w-4 text-orange-600" />
+                <AlertTitle>Potential duplicate</AlertTitle>
+                <AlertDescription>
+                  {transaction.potentialDuplicateMatch ? (
+                    <>
+                      Matches {new Date(transaction.potentialDuplicateMatch.date).toLocaleDateString()}
+                      {' · '}{transaction.potentialDuplicateMatch.description}
+                      {' · '}{new Intl.NumberFormat('de-DE', {
+                        style: 'currency',
+                        currency: 'EUR',
+                      }).format(transaction.potentialDuplicateMatch.amountBase)}.
+                    </>
+                  ) : (
+                    <>A matching transaction already exists.</>
+                  )}{' '}
+                  Review the details below. Choosing Keep anyway explicitly confirms that both
+                  transactions should remain.
+                </AlertDescription>
+              </Alert>
+            )}
             
             <FormField
               control={form.control}
@@ -495,7 +523,9 @@ export function TransactionFormSheet({
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
-              <Button type="submit">Save Changes</Button>
+              <Button type="submit">
+                {transaction?.isPotentialDuplicate ? 'Keep anyway' : 'Save Changes'}
+              </Button>
             </div>
             </form>
           </Form>

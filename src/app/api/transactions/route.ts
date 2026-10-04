@@ -7,8 +7,16 @@ import {
   deleteTransaction,
   deleteTransactions,
   deleteTransactionsByImport,
+  getTransaction,
 } from '@/lib/services/transactions';
-import { findDuplicateTransactions, findPotentialTransfers } from '@/lib/utils/duplicate-utils';
+import {
+  findDuplicateTransactions,
+  findPotentialTransfers,
+  getDuplicateApprovalBlockReason,
+  toPotentialDuplicateMatchContext,
+} from '@/lib/utils/duplicate-utils';
+import { getCategories } from '@/lib/services/categories';
+import { isTransactionSufficientlyClassified } from '@/lib/import-processing';
 
 export async function GET(req: NextRequest) {
   const workspaceId = req.nextUrl.searchParams.get('workspaceId');
@@ -40,10 +48,33 @@ export async function POST(req: NextRequest) {
 
       if (dupes.length > 0) {
         data.isPotentialDuplicate = true;
+        data.potentialDuplicateMatch = toPotentialDuplicateMatchContext(dupes[0]);
+        data.needsReview = true;
       }
       if (transfers.length > 0) {
         data.isPotentialTransfer = true;
         data.potentialTransferMatch = transfers[0]; // Store best match
+        if (data.importId) data.needsReview = true;
+      }
+    }
+
+    if (data.id && data.needsReview === false) {
+      const current = await getTransaction(workspaceId, data.id);
+      if (current?.needsReview) {
+        const duplicateBlockReason = getDuplicateApprovalBlockReason(current, data);
+        if (duplicateBlockReason) {
+          return NextResponse.json(
+            { error: duplicateBlockReason },
+            { status: 409 }
+          );
+        }
+        const categories = await getCategories();
+        if (!isTransactionSufficientlyClassified({ ...current, ...data }, categories)) {
+          return NextResponse.json(
+            { error: 'Choose a valid category and subcategory before completing review.' },
+            { status: 409 }
+          );
+        }
       }
     }
 
@@ -62,6 +93,24 @@ export async function PATCH(req: NextRequest) {
     if (!workspaceId) return NextResponse.json({ error: 'workspaceId required' }, { status: 400 });
 
     if (action === 'confirm') {
+      const transaction = await getTransaction(workspaceId, transactionId);
+      if (!transaction) {
+        return NextResponse.json({ error: 'Transaction not found' }, { status: 404 });
+      }
+      const duplicateBlockReason = getDuplicateApprovalBlockReason(transaction);
+      if (duplicateBlockReason) {
+        return NextResponse.json(
+          { error: duplicateBlockReason },
+          { status: 409 }
+        );
+      }
+      const categories = await getCategories();
+      if (!isTransactionSufficientlyClassified(transaction, categories)) {
+        return NextResponse.json(
+          { error: 'Choose a valid category and subcategory before approving this transaction.' },
+          { status: 409 }
+        );
+      }
       await confirmTransaction(workspaceId, transactionId);
       return NextResponse.json({ ok: true });
     }

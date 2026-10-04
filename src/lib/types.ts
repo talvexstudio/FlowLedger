@@ -27,6 +27,13 @@ export type Account = {
   updatedAt: Date;
 };
 
+export type PotentialDuplicateMatchContext = {
+  transactionId: string;
+  date: Date;
+  description: string;
+  amountBase: number;
+};
+
 export type Transaction = {
   id: string;
   workspaceId: string;
@@ -50,6 +57,7 @@ export type Transaction = {
   destinationAccountId?: string;
   linkedTransactionId?: string;
   isPotentialDuplicate: boolean;
+  potentialDuplicateMatch?: PotentialDuplicateMatchContext | null;
   isPotentialTransfer?: boolean;
   potentialTransferMatch?: any; // DuplicateMatch from duplicate-utils
   isInconsistent: boolean;
@@ -129,8 +137,7 @@ export type ImportTemplate = {
     dateFormat?: string;
     amountOptions?: {
       decimalSeparator?: "," | ".";
-      thousandsSeparator?: "," | ".";
-      alreadySigned?: boolean;
+      thousandsSeparator?: "," | "." | " ";
     };
   };
   defaultAccountId?: string;

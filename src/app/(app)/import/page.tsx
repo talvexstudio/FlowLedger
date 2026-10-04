@@ -1,9 +1,7 @@
 'use client';
 
 import React from 'react';
-import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
-import { parse } from 'date-fns';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,23 +13,31 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { useToast } from '@/hooks/use-toast';
-import { applyRulesToTransaction } from '@/lib/utils/rule-utils';
 import {
+  apiCommitImport,
   apiGetRules,
   apiGetImportTemplates,
-  apiSaveImportSession,
   apiSaveImportTemplate,
-  apiSaveTransaction,
-  apiFindMatchingTemplate,
 } from '@/lib/api';
-import type { Category, ImportTemplate, Subcategory, Transaction } from '@/lib/types';
+import type { ImportTemplate } from '@/lib/types';
 import { ImportResultDialog } from '@/components/import/import-result-dialog';
+import {
+  collectXlsxRows,
+  DEFAULT_IMPORT_DATE_FORMAT,
+  getEffectiveImportMapping,
+  parseCsvBytes,
+  prepareImportTransactions,
+  type CsvTextEncoding,
+  type ImportFileType,
+  type ImportRejectedRow,
+  type ParsedImportFile,
+} from '@/lib/import-processing';
 
-type FileType = 'CSV' | 'XLSX';
+type FileType = ImportFileType;
 
-const DATE_FORMAT_OPTIONS = ['dd/MM/yyyy', 'MM/dd/yyyy', 'yyyy-MM-dd'];
+const DATE_FORMAT_OPTIONS = [DEFAULT_IMPORT_DATE_FORMAT, 'MM/dd/yyyy', 'yyyy-MM-dd'];
 const DECIMAL_SEPARATOR_OPTIONS: Array<',' | '.'> = [',', '.'];
-const THOUSANDS_SEPARATOR_OPTIONS: Array<',' | '.'> = [',', '.'];
+const THOUSANDS_SEPARATOR_OPTIONS: Array<',' | '.' | ' '> = [',', '.', ' '];
 
 export default function ImportPage() {
   const { toast } = useToast();
@@ -45,6 +51,7 @@ export default function ImportPage() {
   const [fileType, setFileType] = React.useState<FileType | null>(null);
   const [headerColumns, setHeaderColumns] = React.useState<string[]>([]);
   const [previewRows, setPreviewRows] = React.useState<Record<string, unknown>[]>([]);
+  const [csvEncoding, setCsvEncoding] = React.useState<CsvTextEncoding | null>(null);
   const [mapping, setMapping] = React.useState<Partial<ImportTemplate['mapping']> | null>(null);
 
   const [targetAccountId, setTargetAccountId] = React.useState<string>('');
@@ -53,8 +60,10 @@ export default function ImportPage() {
   const [isImporting, setIsImporting] = React.useState(false);
   const [importResult, setImportResult] = React.useState<{
     total: number;
+    accepted: number;
     pending: number;
     duplicates: number;
+    rejectedRows: ImportRejectedRow[];
     importId?: string;
   } | null>(null);
   const [resultDialogOpen, setResultDialogOpen] = React.useState(false);
@@ -81,10 +90,10 @@ export default function ImportPage() {
     if (selectedTemplateId === 'generic') return;
     if (!selectedTemplate) return;
     setMapping(selectedTemplate.mapping);
-    if (!targetAccountId && selectedTemplate.defaultAccountId) {
+    if (selectedTemplate.defaultAccountId) {
       setTargetAccountId(selectedTemplate.defaultAccountId);
     }
-  }, [selectedTemplateId, selectedTemplate, targetAccountId]);
+  }, [selectedTemplateId, selectedTemplate]);
 
   const updateMapping = (updates: Partial<ImportTemplate['mapping']>) => {
     setMapping((prev) => ({
@@ -98,6 +107,7 @@ export default function ImportPage() {
     setFileType(null);
     setHeaderColumns([]);
     setPreviewRows([]);
+    setCsvEncoding(null);
     setMapping(null);
   };
 
@@ -111,14 +121,23 @@ export default function ImportPage() {
     if (name.endsWith('.csv')) {
       setFile(nextFile);
       setFileType('CSV');
-      parseCsvPreview(nextFile);
+      try {
+        await parseCsvPreview(nextFile);
+      } catch (error) {
+        toast({
+          variant: 'destructive',
+          title: 'CSV parsing failed',
+          description: error instanceof Error ? error.message : 'The CSV file could not be read.',
+        });
+      }
       return;
     }
 
     if (name.endsWith('.xls') || name.endsWith('.xlsx')) {
       setFile(nextFile);
       setFileType('XLSX');
-      parseXlsxPreview(nextFile);
+      setCsvEncoding(null);
+      await parseXlsxPreview(nextFile);
       return;
     }
 
@@ -130,21 +149,22 @@ export default function ImportPage() {
     });
   };
 
-  const parseCsvPreview = (inputFile: File) => {
-    Papa.parse(inputFile, {
-      header: true,
-      dynamicTyping: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        const rows = (results.data || []) as Record<string, unknown>[];
-        const headers = results.meta.fields || [];
-        setHeaderColumns(headers);
-        setPreviewRows(rows.slice(0, 10));
-        setMapping(
-          selectedTemplate ? selectedTemplate.mapping : { dateField: '', descriptionField: '' }
-        );
-      },
-    });
+  const parseCsvPreview = async (inputFile: File) => {
+    const parsed = parseCsvBytes(await inputFile.arrayBuffer());
+    if (parsed.globalErrors.length > 0 || parsed.rejectedRows.length > 0) {
+      toast({
+        variant: 'destructive',
+        title: 'CSV parsing warning',
+        description: parsed.globalErrors[0]
+          ?? `${parsed.rejectedRows.length} row(s) contain CSV formatting errors.`,
+      });
+    }
+    setCsvEncoding(parsed.encoding);
+    setHeaderColumns(parsed.headers);
+    setPreviewRows(parsed.rows.slice(0, 10).map((row) => row.values));
+    setMapping(
+      selectedTemplate ? selectedTemplate.mapping : { dateField: '', descriptionField: '' }
+    );
   };
 
   const parseXlsxPreview = async (inputFile: File) => {
@@ -153,210 +173,41 @@ export default function ImportPage() {
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
     const json = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as unknown[][];
-
-    if (!json.length) {
-      setHeaderColumns([]);
-      setPreviewRows([]);
-      return;
-    }
-
-    const [headerRow, ...rows] = json;
-    const headers = headerRow.map((h) => String(h || ''));
-    const rowObjects = rows.slice(0, 10).map((row) => {
-      const obj: Record<string, unknown> = {};
-      headers.forEach((h, idx) => {
-        obj[h] = row[idx];
-      });
-      return obj;
-    });
+    const parsed = collectXlsxRows(json);
+    const headers = json[0]?.map((header) => String(header ?? '').trim()).filter(Boolean) ?? [];
 
     setHeaderColumns(headers);
-    setPreviewRows(rowObjects);
+    setPreviewRows(parsed.rows.slice(0, 10).map((row) => row.values));
     setMapping(
       selectedTemplate ? selectedTemplate.mapping : { dateField: '', descriptionField: '' }
     );
+    if (parsed.globalErrors.length > 0) {
+      toast({
+        variant: 'destructive',
+        title: 'XLSX parsing failed',
+        description: parsed.globalErrors[0],
+      });
+    }
   };
 
-  const parseFullCsv = (inputFile: File): Promise<Record<string, unknown>[]> =>
-    new Promise((resolve, reject) => {
-      Papa.parse(inputFile, {
-        header: true,
-        dynamicTyping: true,
-        skipEmptyLines: true,
-        complete: (results) => resolve(results.data as Record<string, unknown>[]),
-        error: reject,
-      });
-    });
+  const parseFullCsv = async (inputFile: File): Promise<ParsedImportFile> =>
+    parseCsvBytes(await inputFile.arrayBuffer());
 
-  const parseFullXlsx = async (inputFile: File): Promise<Record<string, unknown>[]> => {
+  const parseFullXlsx = async (inputFile: File): Promise<ParsedImportFile> => {
     const data = await inputFile.arrayBuffer();
     const workbook = XLSX.read(data, { type: 'array', cellDates: true });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
     const json = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as unknown[][];
-
-    if (!json.length) {
-      return [];
-    }
-
-    const [headerRow, ...rows] = json;
-    const headers = headerRow.map((h) => String(h || ''));
-    return rows
-      .map((row) => {
-        const obj: Record<string, unknown> = {};
-        headers.forEach((h, idx) => {
-          obj[h] = row[idx];
-        });
-        return obj;
-      })
-      .filter((row) => Object.values(row).some((value) => value !== null && value !== undefined && value !== ''));
+    return collectXlsxRows(json);
   };
 
   const parseFullFile = async (
     inputFile: File,
     type: FileType
-  ): Promise<Record<string, unknown>[]> => {
+  ): Promise<ParsedImportFile> => {
     if (type === 'CSV') return parseFullCsv(inputFile);
     return parseFullXlsx(inputFile);
-  };
-
-  const parseDateValue = (
-    value: unknown,
-    formatString?: string,
-    type?: FileType
-  ): Date | null => {
-    if (!value) return null;
-    if (value instanceof Date) return value;
-    if (typeof value === 'number' && type === 'XLSX') {
-      const excelEpoch = new Date(Date.UTC(1899, 11, 30)).getTime();
-      return new Date(excelEpoch + value * 86400000);
-    }
-    const text = String(value).trim();
-    if (!text) return null;
-    if (formatString) {
-      const parsed = parse(text, formatString, new Date());
-      if (!Number.isNaN(parsed.getTime())) return parsed;
-    }
-    const fallback = new Date(text);
-    return Number.isNaN(fallback.getTime()) ? null : fallback;
-  };
-
-  const parseAmountValue = (
-    value: unknown,
-    options?: ImportTemplate['mapping']['amountOptions']
-  ): number => {
-    if (value === null || value === undefined) return 0;
-    if (typeof value === 'number') return value;
-    let raw = String(value).trim();
-    if (!raw) return 0;
-    let negative = false;
-    if (raw.includes('(') && raw.includes(')')) {
-      negative = true;
-      raw = raw.replace(/[()]/g, '');
-    }
-    if (raw.startsWith('-')) {
-      negative = true;
-      raw = raw.slice(1);
-    }
-
-    const decimalSeparator = options?.decimalSeparator || '.';
-    const thousandsSeparator = options?.thousandsSeparator || ',';
-    if (thousandsSeparator) {
-      const regex = new RegExp(`\\${thousandsSeparator}`, 'g');
-      raw = raw.replace(regex, '');
-    }
-    if (decimalSeparator !== '.') {
-      raw = raw.replace(decimalSeparator, '.');
-    }
-    raw = raw.replace(/[^0-9.-]/g, '');
-    const parsed = Number.parseFloat(raw);
-    if (Number.isNaN(parsed)) return 0;
-    return negative ? -parsed : parsed;
-  };
-
-  const buildTransactionFromRow = (
-    row: Record<string, unknown>,
-    map: ImportTemplate['mapping'],
-    type: FileType,
-    context: {
-      workspaceId: string;
-      accountId: string;
-      importId: string;
-      fileName: string;
-    }
-  ): Partial<Transaction> | null => {
-    const date = parseDateValue(row[map.dateField], map.dateFormat, type);
-    if (!date) return null;
-    const descriptionRaw = row[map.descriptionField];
-    const description = descriptionRaw ? String(descriptionRaw).trim() : '';
-    if (!description) return null;
-    const rawDescription = map.rawDescriptionField
-      ? String(row[map.rawDescriptionField] ?? '').trim()
-      : description;
-
-    let amount = 0;
-    if (map.amountField) {
-      amount = parseAmountValue(row[map.amountField], map.amountOptions);
-    } else {
-      const debit = map.debitField ? parseAmountValue(row[map.debitField], map.amountOptions) : 0;
-      const credit = map.creditField ? parseAmountValue(row[map.creditField], map.amountOptions) : 0;
-      amount = credit - debit;
-    }
-
-    const txType: Transaction['type'] = amount < 0 ? 'Expense' : 'Income';
-    const balanceAfter = map.balanceField
-      ? parseAmountValue(row[map.balanceField], map.amountOptions)
-      : undefined;
-
-    return {
-      workspaceId: context.workspaceId,
-      accountId: context.accountId,
-      date,
-      description,
-      rawDescription,
-      amountOriginal: amount,
-      currencyOriginal: 'EUR',
-      amountBase: amount,
-      balanceAfter,
-      type: txType,
-      importId: context.importId,
-      needsReview: true,
-      isInternalTransfer: false,
-      isPotentialDuplicate: false,
-      isInconsistent: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-  };
-
-  const applyDefaultTypeFromSubcategory = (
-    tx: Partial<Transaction>,
-    categoryList: (Category & { subcategories: Subcategory[] })[]
-  ): Partial<Transaction> => {
-    if (!tx.subcategoryId) return tx;
-    const category = categoryList.find((cat) =>
-      cat.subcategories?.some((sub) => sub.id === tx.subcategoryId)
-    );
-    const subcategory = category?.subcategories?.find((sub) => sub.id === tx.subcategoryId);
-    if (subcategory?.flowType) {
-      return {
-        ...tx,
-        type: subcategory.flowType,
-      };
-    }
-    return tx;
-  };
-
-  const isFullyClassified = (
-    tx: Partial<Transaction>,
-    categoryList: (Category & { subcategories: Subcategory[] })[]
-  ) => {
-    if (!tx.categoryId || !tx.type) return false;
-    const category = categoryList.find((cat) => cat.id === tx.categoryId);
-    if (!category) return false;
-    const requiresSubcategory = (category.subcategories || []).length > 0;
-    if (requiresSubcategory && !tx.subcategoryId) return false;
-    return true;
   };
 
   const handleImport = async () => {
@@ -398,81 +249,104 @@ export default function ImportPage() {
 
     setIsImporting(true);
     try {
-      const rows = await parseFullFile(file, fileType);
-
-      const session = await apiSaveImportSession(workspaceId, {
-        workspaceId,
-        accountId: targetAccountId,
-        createdAt: new Date(),
-        fileName: file.name,
-        sourceType: fileType,
-        template: selectedTemplateId === 'generic'
-          ? '(ad-hoc)'
-          : (templates.find(t => t.id === selectedTemplateId)?.name || '(unknown)'),
-        transactionCount: rows.length,
-      });
-
-      if (saveAsTemplate && newTemplateName.trim()) {
-        await apiSaveImportTemplate(workspaceId, {
-          name: newTemplateName.trim(),
-          description: `${fileType} template created from ${file.name}`,
-          sourceType: fileType,
-          headerSignature: headerColumns,
-          mapping: mapping as ImportTemplate['mapping'],
-          defaultAccountId: targetAccountId,
-        });
-        const tpl = await apiGetImportTemplates(workspaceId);
-        setTemplates(tpl);
+      const parsedFile = await parseFullFile(file, fileType);
+      if (parsedFile.globalErrors.length > 0) {
+        throw new Error(parsedFile.globalErrors.join(' '));
       }
 
       const rules = await apiGetRules(workspaceId);
-      const baseContext = {
-        workspaceId,
-        accountId: targetAccountId,
-        importId: session.id,
-        fileName: file.name,
-      };
+      const effectiveMapping = getEffectiveImportMapping(
+        mapping as ImportTemplate['mapping']
+      );
+      const prepared = prepareImportTransactions(
+        parsedFile.rows,
+        effectiveMapping,
+        fileType,
+        { workspaceId, accountId: targetAccountId },
+        rules,
+        categories
+      );
+      const rejectedRows = [...parsedFile.rejectedRows, ...prepared.rejectedRows]
+        .sort((a, b) => a.rowNumber - b.rowNumber);
+      const totalRows = prepared.transactions.length + rejectedRows.length;
 
-      let createdCount = 0;
-      const created: Transaction[] = [];
-      for (const row of rows) {
-        const baseTx = buildTransactionFromRow(row, mapping as ImportTemplate['mapping'], fileType, baseContext);
-        if (!baseTx) continue;
-          const withRules = applyRulesToTransaction(baseTx, rules);
-          const withType = applyDefaultTypeFromSubcategory(withRules, categories);
-        const isClassified = isFullyClassified(withType, categories);
-        const saved = await apiSaveTransaction(workspaceId, {
-          ...withType,
-          workspaceId,
-          accountId: targetAccountId,
-          needsReview: !isClassified,
-          importId: session.id,
+      if (prepared.transactions.length === 0) {
+        setImportResult({
+          total: totalRows,
+          accepted: 0,
+          pending: 0,
+          duplicates: 0,
+          rejectedRows,
         });
-        createdCount += 1;
-        created.push(saved as Transaction);
+        setResultDialogOpen(true);
+        toast({
+          variant: 'destructive',
+          title: 'No transactions imported',
+          description: `${rejectedRows.length} row(s) were rejected. Review the reported reasons and mapping.`,
+        });
+        return;
       }
+
+      const { session, transactions: created } = await apiCommitImport(
+        workspaceId,
+        {
+          accountId: targetAccountId,
+          createdAt: new Date(),
+          fileName: file.name,
+          sourceType: fileType,
+          template: selectedTemplateId === 'generic'
+            ? '(ad-hoc)'
+            : (templates.find((template) => template.id === selectedTemplateId)?.name || '(unknown)'),
+          transactionCount: prepared.transactions.length,
+        },
+        prepared.transactions
+      );
 
       await reloadTransactions();
       const pendingCount = created.filter((tx) => tx.needsReview !== false).length;
       const duplicateCount = created.filter((tx) => tx.isPotentialDuplicate).length;
       setImportResult({
-        total: createdCount,
+        total: totalRows,
+        accepted: created.length,
         pending: pendingCount,
         duplicates: duplicateCount,
+        rejectedRows,
         importId: session.id,
       });
+      setResultDialogOpen(true);
 
-      if (createdCount > 0 && pendingCount === 0) {
+      toast({
+        title: 'Import completed',
+        description: `${created.length} imported, ${pendingCount} pending review, ${rejectedRows.length} rejected.`,
+      });
+
+      if (saveAsTemplate && newTemplateName.trim()) {
+        try {
+          await apiSaveImportTemplate(workspaceId, {
+            name: newTemplateName.trim(),
+            description: `${fileType} template created from ${file.name}`,
+            sourceType: fileType,
+            headerSignature: headerColumns,
+            mapping: effectiveMapping,
+            defaultAccountId: targetAccountId,
+          });
+          const savedTemplates = await apiGetImportTemplates(workspaceId);
+          setTemplates(savedTemplates);
+        } catch (templateError) {
+          console.error(templateError);
+          toast({
+            variant: 'destructive',
+            title: 'Import completed, template not saved',
+            description: 'Transactions were imported safely, but the reusable mapping could not be saved.',
+          });
+        }
+      }
+
+      if (pendingCount > 0) {
         toast({
-          title: 'Import completed',
-          description: `Imported ${createdCount} transaction(s). All of them were classified by your existing rules.`,
+          title: 'Review required',
+          description: `${pendingCount} imported transaction(s) need review before affecting reports.`,
         });
-      } else if (createdCount > 0) {
-        toast({
-          title: 'Import completed',
-          description: `Imported ${createdCount} transaction(s). ${pendingCount} still need classification.`,
-        });
-        setResultDialogOpen(true);
       }
 
       resetFileState();
@@ -483,7 +357,9 @@ export default function ImportPage() {
       toast({
         variant: 'destructive',
         title: 'Import failed',
-        description: 'Something went wrong while importing this file.',
+        description: error instanceof Error
+          ? error.message
+          : 'Something went wrong while importing this file.',
       });
     } finally {
       setIsImporting(false);
@@ -526,6 +402,9 @@ export default function ImportPage() {
             <p className="text-xs text-muted-foreground">Templates help map file columns correctly.</p>
           </div>
           <FileUploader file={file} onFileSelected={handleFileSelected} />
+          {fileType === 'CSV' && csvEncoding && (
+            <p className="text-xs text-muted-foreground">CSV encoding: {csvEncoding}</p>
+          )}
 
           {headerColumns.length > 0 && (
             <>
@@ -706,7 +585,7 @@ export default function ImportPage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label>Decimal separator</Label>
                       <Select
@@ -740,7 +619,7 @@ export default function ImportPage() {
                           updateMapping({
                             amountOptions: {
                               ...(mapping?.amountOptions || {}),
-                              thousandsSeparator: val as ',' | '.',
+                              thousandsSeparator: val as ',' | '.' | ' ',
                             },
                           })
                         }
@@ -751,26 +630,11 @@ export default function ImportPage() {
                         <SelectContent>
                           {THOUSANDS_SEPARATOR_OPTIONS.map((option) => (
                             <SelectItem key={option} value={option}>
-                              {option}
+                              {option === ' ' ? 'Space' : option}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                    </div>
-                    <div className="flex items-center gap-2 pt-6">
-                      <Checkbox
-                        checked={mapping?.amountOptions?.alreadySigned || false}
-                        onCheckedChange={(checked) =>
-                          updateMapping({
-                            amountOptions: {
-                              ...(mapping?.amountOptions || {}),
-                              alreadySigned: Boolean(checked),
-                            },
-                          })
-                        }
-                        id="alreadySigned"
-                      />
-                      <Label htmlFor="alreadySigned">Amounts already signed</Label>
                     </div>
                   </div>
 
@@ -859,8 +723,10 @@ export default function ImportPage() {
           open={resultDialogOpen}
           onOpenChange={setResultDialogOpen}
           total={importResult.total}
+          accepted={importResult.accepted}
           pending={importResult.pending}
           duplicates={importResult.duplicates}
+          rejectedRows={importResult.rejectedRows}
           onReviewNow={handleReviewNow}
         />
       )}

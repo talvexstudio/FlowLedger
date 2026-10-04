@@ -49,6 +49,14 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
     return '';
   }
   const getAccountName = (accId: string) => accounts.find(a => a.id === accId)?.name || 'Unknown Account';
+  const isUnclassified = (transaction: Transaction) => {
+    const category = categories.find((candidate) => candidate.id === transaction.categoryId);
+    if (!category) return true;
+    if (category.subcategories.length === 0) return false;
+    return !category.subcategories.some(
+      (subcategory) => subcategory.id === transaction.subcategoryId
+    );
+  };
   
   const handleApprove = async (transactionId: string) => {
     if (!workspaceId) return;
@@ -64,7 +72,9 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
       toast({
         variant: 'destructive',
         title: 'Approval failed',
-        description: 'Could not approve transaction.'
+        description: error instanceof Error
+          ? error.message
+          : 'Could not approve transaction.'
       });
     }
   };
@@ -124,7 +134,9 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
         toast({
             variant: 'destructive',
             title: 'Update failed',
-            description: 'Could not save transaction changes.',
+            description: error instanceof Error
+              ? error.message
+              : 'Could not save transaction changes.',
         });
     }
   };
@@ -231,7 +243,29 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
                 <TableRow key={transaction.id}>
                   <TableCell className="hidden md:table-cell">{new Date(transaction.date).toLocaleDateString()}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{getAccountName(transaction.accountId)}</TableCell>
-                  <TableCell className="font-medium">{transaction.description}</TableCell>
+                  <TableCell className="font-medium">
+                    <div className="flex flex-col gap-1">
+                      <span>{transaction.description}</span>
+                      {transaction.isPotentialDuplicate ? (
+                        <>
+                          <Badge variant="outline" className="w-fit border-orange-400 text-orange-700">
+                            Potential duplicate
+                          </Badge>
+                          {transaction.potentialDuplicateMatch && (
+                            <span className="max-w-sm text-xs font-normal text-muted-foreground">
+                              Matches {new Date(transaction.potentialDuplicateMatch.date).toLocaleDateString()}
+                              {' · '}{transaction.potentialDuplicateMatch.description}
+                              {' · '}€{transaction.potentialDuplicateMatch.amountBase.toFixed(2)}
+                            </span>
+                          )}
+                        </>
+                      ) : isUnclassified(transaction) ? (
+                        <Badge variant="outline" className="w-fit text-xs">Unclassified</Badge>
+                      ) : (
+                        <Badge variant="secondary" className="w-fit text-xs">Needs review</Badge>
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell>
                     <div className="flex flex-col">
                         <Badge variant="outline" className="mb-1 w-fit">{getCategoryName(transaction.categoryId)}</Badge>
@@ -241,10 +275,12 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
                   <TableCell className={`text-right font-semibold ${transaction.amountBase > 0 ? 'text-green-600' : ''}`}>€{transaction.amountBase.toFixed(2)}</TableCell>
                   <TableCell className="text-right">
                     <div className="hidden md:flex items-center justify-end">
-                      <Button variant="ghost" size="icon" onClick={() => handleApprove(transaction.id)}>
-                          <Check className="h-4 w-4 text-green-500" />
-                          <span className="sr-only">Approve</span>
-                      </Button>
+                      {!transaction.isPotentialDuplicate && (
+                        <Button variant="ghost" size="icon" onClick={() => handleApprove(transaction.id)}>
+                            <Check className="h-4 w-4 text-green-500" />
+                            <span className="sr-only">Approve</span>
+                        </Button>
+                      )}
                       <Button variant="ghost" size="icon" onClick={() => setEditingTransaction(transaction)}>
                           <Edit className="h-4 w-4 text-primary" />
                           <span className="sr-only">Edit</span>
@@ -258,10 +294,12 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
                                 </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => handleApprove(transaction.id)}>
-                                    <Check className="mr-2 h-4 w-4 text-green-500" />
-                                    Approve
-                                </DropdownMenuItem>
+                                {!transaction.isPotentialDuplicate && (
+                                  <DropdownMenuItem onClick={() => handleApprove(transaction.id)}>
+                                      <Check className="mr-2 h-4 w-4 text-green-500" />
+                                      Approve
+                                  </DropdownMenuItem>
+                                )}
                                 <DropdownMenuItem onClick={() => setEditingTransaction(transaction)}>
                                     <Edit className="mr-2 h-4 w-4 text-primary" />
                                     Edit

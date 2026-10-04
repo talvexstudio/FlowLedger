@@ -98,8 +98,33 @@ export const apiDeleteRule = (workspaceId: string, id: string) =>
 export const apiGetImportSessions = (workspaceId: string) =>
   call<ImportSession[]>(`/api/imports?workspaceId=${workspaceId}`);
 
-export const apiSaveImportSession = (workspaceId: string, data: Omit<ImportSession, 'id'>) =>
-  call<ImportSession>('/api/imports', { method: 'POST', body: JSON.stringify({ workspaceId, ...data }) });
+export const buildImportSessionSaveRequest = (
+  workspaceId: string,
+  data: Omit<ImportSession, 'id' | 'workspaceId'>
+) => ({ ...data, workspaceId });
+
+export const apiSaveImportSession = (
+  workspaceId: string,
+  data: Omit<ImportSession, 'id' | 'workspaceId'>
+) =>
+  call<ImportSession>('/api/imports', {
+    method: 'POST',
+    body: JSON.stringify(buildImportSessionSaveRequest(workspaceId, data)),
+  });
+
+export const apiCommitImport = (
+  workspaceId: string,
+  session: Omit<ImportSession, 'id' | 'workspaceId'>,
+  transactions: Partial<Transaction>[]
+) =>
+  call<{ session: ImportSession; transactions: Transaction[] }>('/api/imports', {
+    method: 'POST',
+    body: JSON.stringify({
+      workspaceId,
+      session: buildImportSessionSaveRequest(workspaceId, session),
+      transactions,
+    }),
+  });
 
 export const apiDeleteImportSession = (workspaceId: string, id: string) =>
   call<{ ok: true }>('/api/imports', { method: 'DELETE', body: JSON.stringify({ workspaceId, id }) });
@@ -108,8 +133,19 @@ export const apiDeleteImportSession = (workspaceId: string, id: string) =>
 export const apiGetImportTemplates = (workspaceId: string) =>
   call<ImportTemplate[]>(`/api/import-templates?workspaceId=${workspaceId}`);
 
-export const apiSaveImportTemplate = (workspaceId: string, data: Omit<ImportTemplate, 'id' | 'createdAt'>) =>
-  call<ImportTemplate>('/api/import-templates', { method: 'POST', body: JSON.stringify({ workspaceId, ...data }) });
+export const buildImportTemplateSaveRequest = (
+  workspaceId: string,
+  data: Omit<ImportTemplate, 'id' | 'createdAt' | 'workspaceId'>
+) => ({ ...data, workspaceId });
+
+export const apiSaveImportTemplate = (
+  workspaceId: string,
+  data: Omit<ImportTemplate, 'id' | 'createdAt' | 'workspaceId'>
+) =>
+  call<ImportTemplate>('/api/import-templates', {
+    method: 'POST',
+    body: JSON.stringify(buildImportTemplateSaveRequest(workspaceId, data)),
+  });
 
 export const apiFindMatchingTemplate = (workspaceId: string, headerSignature: string[]) =>
   call<ImportTemplate | null>(
