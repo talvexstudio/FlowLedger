@@ -13,6 +13,11 @@ import type {
   Transaction,
   Workspace,
 } from '@/lib/types';
+import type {
+  PdfExtractionErrorCode,
+  PdfExtractionReport,
+  PdfTemplateSummary,
+} from '@/lib/pdf-import/types';
 
 async function call<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -151,6 +156,33 @@ export const apiFindMatchingTemplate = (workspaceId: string, headerSignature: st
   call<ImportTemplate | null>(
     `/api/import-templates?workspaceId=${workspaceId}&headers=${encodeURIComponent(JSON.stringify(headerSignature))}`
   );
+
+// PDF statement extraction is deliberately separate from reusable CSV/XLSX mappings.
+export class PdfExtractionApiError extends Error {
+  constructor(message: string, readonly code?: PdfExtractionErrorCode) {
+    super(message);
+    this.name = 'PdfExtractionApiError';
+  }
+}
+
+export const apiGetPdfTemplates = () =>
+  call<PdfTemplateSummary[]>('/api/pdf-import/templates');
+
+export const apiExtractPdfStatement = async (file: File, templateId: string) => {
+  const form = new FormData();
+  form.set('templateId', templateId);
+  form.set('file', file);
+  const response = await fetch('/api/pdf-import/extract', { method: 'POST', body: form });
+  const json = await response.json() as PdfExtractionReport | {
+    error?: string;
+    code?: PdfExtractionErrorCode;
+  };
+  if (!response.ok) {
+    const failure = json as { error?: string; code?: PdfExtractionErrorCode };
+    throw new PdfExtractionApiError(failure.error ?? 'PDF extraction failed.', failure.code);
+  }
+  return json as PdfExtractionReport;
+};
 
 // ─── Budgets ────────────────────────────────────────────────────────────────
 export const apiGetBudget = (workspaceId: string, year: number) =>

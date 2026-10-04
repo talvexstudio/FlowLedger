@@ -52,14 +52,14 @@ export function FileUploader({ file: controlledFile, onFileSelected }: FileUploa
         {file ? file.name : 'Drag and drop your file here'}
       </p>
       <p className="mt-1 text-xs text-muted-foreground">
-        {file ? `${(file.size / 1024).toFixed(1)} KB` : 'CSV or XLSX, up to 10MB'}
+        {file ? `${(file.size / 1024).toFixed(1)} KB` : 'CSV, XLSX, or selectable-text PDF'}
       </p>
       <input
         id={id}
         type="file"
         className="absolute inset-0 h-full w-full opacity-0"
         onChange={handleFileChange}
-        accept=".csv,.xlsx"
+        accept=".csv,.xls,.xlsx,.pdf"
       />
     </label>
   );

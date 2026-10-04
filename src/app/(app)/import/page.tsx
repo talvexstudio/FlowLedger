@@ -10,13 +10,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { useToast } from '@/hooks/use-toast';
 import {
   apiCommitImport,
+  apiExtractPdfStatement,
+  apiGetPdfTemplates,
   apiGetRules,
   apiGetImportTemplates,
+  PdfExtractionApiError,
   apiSaveImportTemplate,
 } from '@/lib/api';
 import type { ImportTemplate } from '@/lib/types';
@@ -32,12 +36,38 @@ import {
   type ImportRejectedRow,
   type ParsedImportFile,
 } from '@/lib/import-processing';
+import {
+  adaptPdfExtraction,
+  PdfImportAdapterError,
+  PDF_IMPORT_FIELDS,
+} from '@/lib/pdf-import/adapter';
+import { getPdfExtractionErrorMessage } from '@/lib/pdf-import/errors';
+import {
+  evaluatePdfReconciliation,
+  reducePdfAcknowledgement,
+} from '@/lib/pdf-import/reconciliation';
+import type { PdfExtractionReport, PdfTemplateSummary } from '@/lib/pdf-import/types';
 
 type FileType = ImportFileType;
 
 const DATE_FORMAT_OPTIONS = [DEFAULT_IMPORT_DATE_FORMAT, 'MM/dd/yyyy', 'yyyy-MM-dd'];
 const DECIMAL_SEPARATOR_OPTIONS: Array<',' | '.'> = [',', '.'];
 const THOUSANDS_SEPARATOR_OPTIONS: Array<',' | '.' | ' '> = [',', '.', ' '];
+const PDF_PREVIEW_COLUMNS = [
+  PDF_IMPORT_FIELDS.primaryDate,
+  PDF_IMPORT_FIELDS.postingDate,
+  PDF_IMPORT_FIELDS.valueDate,
+  PDF_IMPORT_FIELDS.description,
+  PDF_IMPORT_FIELDS.amount,
+  PDF_IMPORT_FIELDS.debit,
+  PDF_IMPORT_FIELDS.credit,
+  PDF_IMPORT_FIELDS.balance,
+  PDF_IMPORT_FIELDS.page,
+];
+const formatEur = (value: number | null | undefined) =>
+  value === null || value === undefined
+    ? 'Unavailable'
+    : new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR' }).format(value);
 
 export default function ImportPage() {
   const { toast } = useToast();
@@ -46,6 +76,8 @@ export default function ImportPage() {
 
   const [templates, setTemplates] = React.useState<ImportTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = React.useState<string | 'generic'>('generic');
+  const [pdfTemplates, setPdfTemplates] = React.useState<PdfTemplateSummary[]>([]);
+  const [selectedPdfTemplateId, setSelectedPdfTemplateId] = React.useState('');
 
   const [file, setFile] = React.useState<File | null>(null);
   const [fileType, setFileType] = React.useState<FileType | null>(null);
@@ -53,6 +85,13 @@ export default function ImportPage() {
   const [previewRows, setPreviewRows] = React.useState<Record<string, unknown>[]>([]);
   const [csvEncoding, setCsvEncoding] = React.useState<CsvTextEncoding | null>(null);
   const [mapping, setMapping] = React.useState<Partial<ImportTemplate['mapping']> | null>(null);
+  const [pdfReport, setPdfReport] = React.useState<PdfExtractionReport | null>(null);
+  const [pdfParsedFile, setPdfParsedFile] = React.useState<ParsedImportFile | null>(null);
+  const [isExtractingPdf, setIsExtractingPdf] = React.useState(false);
+  const [pdfAcknowledgement, dispatchPdfAcknowledgement] = React.useReducer(
+    reducePdfAcknowledgement,
+    { acknowledged: false, fileKey: null, templateId: null }
+  );
 
   const [targetAccountId, setTargetAccountId] = React.useState<string>('');
   const [saveAsTemplate, setSaveAsTemplate] = React.useState(false);
@@ -67,6 +106,13 @@ export default function ImportPage() {
     importId?: string;
   } | null>(null);
   const [resultDialogOpen, setResultDialogOpen] = React.useState(false);
+
+  const pdfReconciliationGate = React.useMemo(
+    () => pdfReport
+      ? evaluatePdfReconciliation(pdfReport.reconciliation, pdfAcknowledgement.acknowledged)
+      : null,
+    [pdfReport, pdfAcknowledgement.acknowledged]
+  );
 
   const selectedTemplate = React.useMemo(
     () => templates.find((tpl) => tpl.id === selectedTemplateId) || null,
@@ -85,6 +131,19 @@ export default function ImportPage() {
     };
     loadTemplates();
   }, [workspaceId]);
+
+  React.useEffect(() => {
+    if (fileType !== 'PDF' || pdfTemplates.length > 0) return;
+    apiGetPdfTemplates()
+      .then(setPdfTemplates)
+      .catch(() => {
+        toast({
+          variant: 'destructive',
+          title: 'PDF templates unavailable',
+          description: 'The supported PDF template list could not be loaded.',
+        });
+      });
+  }, [fileType, pdfTemplates.length, toast]);
 
   React.useEffect(() => {
     if (selectedTemplateId === 'generic') return;
@@ -109,6 +168,10 @@ export default function ImportPage() {
     setPreviewRows([]);
     setCsvEncoding(null);
     setMapping(null);
+    setPdfReport(null);
+    setPdfParsedFile(null);
+    setSelectedPdfTemplateId('');
+    dispatchPdfAcknowledgement({ type: 'FILE_CHANGED', fileKey: null });
   };
 
   const handleFileSelected = async (nextFile: File | null) => {
@@ -116,6 +179,14 @@ export default function ImportPage() {
       resetFileState();
       return;
     }
+
+    const fileKey = `${nextFile.name}:${nextFile.size}:${nextFile.lastModified}`;
+    dispatchPdfAcknowledgement({ type: 'FILE_CHANGED', fileKey });
+    setPdfReport(null);
+    setPdfParsedFile(null);
+    setHeaderColumns([]);
+    setPreviewRows([]);
+    setMapping(null);
 
     const name = nextFile.name.toLowerCase();
     if (name.endsWith('.csv')) {
@@ -141,12 +212,66 @@ export default function ImportPage() {
       return;
     }
 
+    if (name.endsWith('.pdf')) {
+      setFile(nextFile);
+      setFileType('PDF');
+      setCsvEncoding(null);
+      setSelectedPdfTemplateId('');
+      setSaveAsTemplate(false);
+      setNewTemplateName('');
+      dispatchPdfAcknowledgement({ type: 'TEMPLATE_CHANGED', templateId: null });
+      return;
+    }
+
     resetFileState();
     toast({
       variant: 'destructive',
       title: 'Unsupported file type',
-      description: 'Please upload a CSV or XLSX file.',
+      description: 'Please upload a CSV, XLSX, or PDF file.',
     });
+  };
+
+  const handlePdfTemplateChanged = (templateId: string) => {
+    setSelectedPdfTemplateId(templateId);
+    setPdfReport(null);
+    setPdfParsedFile(null);
+    setPreviewRows([]);
+    setMapping(null);
+    dispatchPdfAcknowledgement({ type: 'TEMPLATE_CHANGED', templateId });
+  };
+
+  const handlePdfExtract = async () => {
+    if (!file || fileType !== 'PDF' || !selectedPdfTemplateId) {
+      toast({
+        variant: 'destructive',
+        title: 'PDF template required',
+        description: 'Select the matching PDF template before extracting.',
+      });
+      return;
+    }
+    setIsExtractingPdf(true);
+    setPdfReport(null);
+    setPdfParsedFile(null);
+    setPreviewRows([]);
+    setMapping(null);
+    dispatchPdfAcknowledgement({ type: 'ACKNOWLEDGE', value: false });
+    try {
+      const report = await apiExtractPdfStatement(file, selectedPdfTemplateId);
+      const adapted = adaptPdfExtraction(report);
+      setPdfReport(report);
+      setPdfParsedFile(adapted.parsedFile);
+      setMapping(adapted.mapping);
+      setPreviewRows(adapted.previewRows);
+    } catch (error) {
+      const description = error instanceof PdfExtractionApiError
+        ? getPdfExtractionErrorMessage(error.code)
+        : error instanceof PdfImportAdapterError
+          ? error.message
+          : 'The PDF could not be extracted.';
+      toast({ variant: 'destructive', title: 'PDF extraction failed', description });
+    } finally {
+      setIsExtractingPdf(false);
+    }
   };
 
   const parseCsvPreview = async (inputFile: File) => {
@@ -207,7 +332,9 @@ export default function ImportPage() {
     type: FileType
   ): Promise<ParsedImportFile> => {
     if (type === 'CSV') return parseFullCsv(inputFile);
-    return parseFullXlsx(inputFile);
+    if (type === 'XLSX') return parseFullXlsx(inputFile);
+    if (!pdfParsedFile) throw new Error('Extract and preview the PDF before importing.');
+    return pdfParsedFile;
   };
 
   const handleImport = async () => {
@@ -238,7 +365,18 @@ export default function ImportPage() {
       return;
     }
 
-    if (saveAsTemplate && !newTemplateName.trim()) {
+    if (fileType === 'PDF' && (!pdfReport || !pdfReconciliationGate?.canContinue)) {
+      toast({
+        variant: 'destructive',
+        title: 'PDF import not ready',
+        description: pdfReconciliationGate?.blocked
+          ? pdfReconciliationGate.reason
+          : 'Extract the PDF and acknowledge any reconciliation warning before importing.',
+      });
+      return;
+    }
+
+    if (fileType !== 'PDF' && saveAsTemplate && !newTemplateName.trim()) {
       toast({
         variant: 'destructive',
         title: 'Template name required',
@@ -294,9 +432,11 @@ export default function ImportPage() {
           createdAt: new Date(),
           fileName: file.name,
           sourceType: fileType,
-          template: selectedTemplateId === 'generic'
-            ? '(ad-hoc)'
-            : (templates.find((template) => template.id === selectedTemplateId)?.name || '(unknown)'),
+          template: fileType === 'PDF'
+            ? (pdfTemplates.find((template) => template.id === selectedPdfTemplateId)?.name || '(unknown)')
+            : selectedTemplateId === 'generic'
+              ? '(ad-hoc)'
+              : (templates.find((template) => template.id === selectedTemplateId)?.name || '(unknown)'),
           transactionCount: prepared.transactions.length,
         },
         prepared.transactions
@@ -320,7 +460,7 @@ export default function ImportPage() {
         description: `${created.length} imported, ${pendingCount} pending review, ${rejectedRows.length} rejected.`,
       });
 
-      if (saveAsTemplate && newTemplateName.trim()) {
+      if (fileType !== 'PDF' && saveAsTemplate && newTemplateName.trim()) {
         try {
           await apiSaveImportTemplate(workspaceId, {
             name: newTemplateName.trim(),
@@ -384,29 +524,145 @@ export default function ImportPage() {
           <CardDescription>Select an import template and upload your file.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="space-y-2">
-            <Label htmlFor="template">Import Template</Label>
-            <Select value={selectedTemplateId} onValueChange={(val) => setSelectedTemplateId(val as 'generic' | string)}>
-              <SelectTrigger id="template">
-                <SelectValue placeholder="Select a template..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="generic">Generic CSV/XLSX</SelectItem>
-                {templates.map((tpl) => (
-                  <SelectItem key={tpl.id} value={tpl.id}>
-                    {tpl.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">Templates help map file columns correctly.</p>
-          </div>
+          {fileType !== 'PDF' && (
+            <div className="space-y-2">
+              <Label htmlFor="template">Import Template</Label>
+              <Select value={selectedTemplateId} onValueChange={(val) => setSelectedTemplateId(val as 'generic' | string)}>
+                <SelectTrigger id="template">
+                  <SelectValue placeholder="Select a template..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="generic">Generic CSV/XLSX</SelectItem>
+                  {templates.map((tpl) => (
+                    <SelectItem key={tpl.id} value={tpl.id}>
+                      {tpl.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Templates help map file columns correctly.</p>
+            </div>
+          )}
           <FileUploader file={file} onFileSelected={handleFileSelected} />
           {fileType === 'CSV' && csvEncoding && (
             <p className="text-xs text-muted-foreground">CSV encoding: {csvEncoding}</p>
           )}
 
-          {headerColumns.length > 0 && (
+          {fileType === 'PDF' && file && (
+            <Card className="border-dashed">
+              <CardHeader>
+                <CardTitle>PDF extraction</CardTitle>
+                <CardDescription>
+                  Source type: PDF. Select the statement layout explicitly; templates are not auto-detected.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>PDF template</Label>
+                    <Select value={selectedPdfTemplateId} onValueChange={handlePdfTemplateChanged}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select the bank statement template" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {pdfTemplates.map((template) => (
+                          <SelectItem key={template.id} value={template.id}>
+                            {template.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Target account</Label>
+                    <Select value={targetAccountId} onValueChange={setTargetAccountId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select account" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {accountOptions.map((account) => (
+                          <SelectItem key={account.id} value={account.id}>
+                            {account.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handlePdfExtract}
+                  disabled={!selectedPdfTemplateId || isExtractingPdf}
+                >
+                  {isExtractingPdf ? 'Extracting PDF...' : 'Extract and preview'}
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {pdfReport && pdfReconciliationGate && (
+            <Alert variant={pdfReconciliationGate.blocked ? 'destructive' : 'default'}>
+              <AlertTitle>Reconciliation: {pdfReconciliationGate.displayStatus}</AlertTitle>
+              <AlertDescription>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+                  <span><strong>{pdfReport.transactionTable.rowCount}</strong> transactions</span>
+                  <span>Opening: <strong>{formatEur(pdfReport.reconciliation.openingBalance)}</strong></span>
+                  <span>Closing: <strong>{formatEur(pdfReport.reconciliation.statementClosingBalance)}</strong></span>
+                  <span>Difference: <strong>{formatEur(pdfReport.reconciliation.difference)}</strong></span>
+                </div>
+                <p className="mt-2">{pdfReconciliationGate.reason}</p>
+                {pdfReconciliationGate.requiresAcknowledgement && (
+                  <div className="mt-3 flex items-center gap-2">
+                    <Checkbox
+                      id="pdf-reconciliation-acknowledgement"
+                      checked={pdfAcknowledgement.acknowledged}
+                      onCheckedChange={(checked) => dispatchPdfAcknowledgement({
+                        type: 'ACKNOWLEDGE',
+                        value: Boolean(checked),
+                      })}
+                    />
+                    <Label htmlFor="pdf-reconciliation-acknowledgement">
+                      Import despite reconciliation warning
+                    </Label>
+                  </div>
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {fileType === 'PDF' && previewRows.length > 0 && (
+            <Card className="border-muted">
+              <CardHeader>
+                <CardTitle>Preview</CardTitle>
+                <CardDescription>First 10 extracted transactions.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        {PDF_PREVIEW_COLUMNS.map((column) => <TableHead key={column}>{column}</TableHead>)}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {previewRows.map((row, rowIndex) => (
+                        <TableRow key={rowIndex}>
+                          {PDF_PREVIEW_COLUMNS.map((column) => (
+                            <TableCell key={`${rowIndex}-${column}`}>
+                              {row[column] !== undefined && row[column] !== null ? String(row[column]) : ''}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {headerColumns.length > 0 && fileType !== 'PDF' && (
             <>
               <Card className="border-dashed">
                 <CardHeader>
@@ -713,7 +969,15 @@ export default function ImportPage() {
           )}
         </CardContent>
         <CardFooter>
-          <Button className="w-full" onClick={handleImport} disabled={isImporting}>
+          <Button
+            className="w-full"
+            onClick={handleImport}
+            disabled={
+              isImporting ||
+              isExtractingPdf ||
+              (fileType === 'PDF' && (!pdfReport || !pdfReconciliationGate?.canContinue))
+            }
+          >
             {isImporting ? 'Importing...' : 'Import Transactions'}
           </Button>
         </CardFooter>

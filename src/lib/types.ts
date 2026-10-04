@@ -39,6 +39,7 @@ export type Transaction = {
   workspaceId: string;
   accountId: string;
   date: Date;
+  postingDate?: Date;
   valueDate?: Date;
   description: string;
   rawDescription: string;
@@ -73,7 +74,7 @@ export type ImportSession = {
   accountId: string;
   createdAt: Date;
   fileName: string;
-  sourceType: "CSV" | "XLSX";
+  sourceType: "CSV" | "XLSX" | "PDF";
   template: string;
   transactionCount: number;
 };
@@ -128,6 +129,8 @@ export type ImportTemplate = {
   headerSignature: string[];
   mapping: {
     dateField: string;
+    postingDateField?: string;
+    valueDateField?: string;
     descriptionField: string;
     rawDescriptionField?: string;
     debitField?: string;

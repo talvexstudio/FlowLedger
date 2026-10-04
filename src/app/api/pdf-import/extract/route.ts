@@ -8,8 +8,15 @@ const errorStatus = (error: PdfExtractionError) => {
     case 'INVALID_FILE':
     case 'UNSUPPORTED_TEMPLATE':
       return 400;
-    case 'EXTRACTION_TIMEOUT':
+    case 'PROCESS_TIMEOUT':
       return 504;
+    case 'PYTHON_UNAVAILABLE':
+    case 'DEPENDENCY_MISSING':
+      return 503;
+    case 'NO_SELECTABLE_TEXT':
+    case 'TEMPLATE_MISMATCH':
+    case 'LEDGER_NOT_FOUND':
+    case 'NO_TRANSACTIONS':
     case 'INVALID_ENGINE_RESPONSE':
     case 'EXTRACTION_FAILED':
       return 422;

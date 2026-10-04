@@ -2,6 +2,12 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type {
+  PdfExtractionErrorCode,
+  PdfExtractionReport,
+  PdfTemplateId,
+  PdfTemplateSummary,
+} from '@/lib/pdf-import/types';
 
 export const SUPPORTED_PDF_TEMPLATES = [
   {
@@ -21,69 +27,6 @@ export const SUPPORTED_PDF_TEMPLATES = [
   },
 ] as const;
 
-export type PdfTemplateId = (typeof SUPPORTED_PDF_TEMPLATES)[number]['id'];
-export type PdfTemplateSummary = Pick<(typeof SUPPORTED_PDF_TEMPLATES)[number], 'id' | 'name'>;
-
-export type PdfExtractionRow = {
-  postingDateRaw: string | null;
-  valueDateRaw: string | null;
-  postingDate: string | null;
-  valueDate: string | null;
-  description: string;
-  signedAmountRaw: string | null;
-  debitRaw: string | null;
-  creditRaw: string | null;
-  balanceRaw: string | null;
-  page: number;
-  source: {
-    bbox: [number, number, number, number];
-    y: number;
-  };
-};
-
-export type PdfExtractionReport = {
-  reportVersion: number;
-  engineVersion: string;
-  template: {
-    schemaVersion: number;
-    id: PdfTemplateId;
-    name: string;
-  };
-  source: {
-    filename: string;
-  };
-  document: {
-    pageCount: number;
-    selectableText: boolean;
-  };
-  context: Record<string, unknown>;
-  transactionTable: {
-    amountModel: 'SIGNED_AMOUNT' | 'DEBIT_CREDIT';
-    dateModel: 'FULL_DATE' | 'ABBREVIATED_WITH_STATEMENT_PERIOD';
-    primaryDateRole: 'postingDate' | 'valueDate';
-    detectedPages: Array<{ page: number; rowCount: number }>;
-    rowCount: number;
-    signedAmountRowCount: number;
-    debitRowCount: number;
-    creditRowCount: number;
-    ambiguousRowCount: number;
-    ambiguousRows: unknown[];
-    rows: PdfExtractionRow[];
-  };
-  reconciliation: {
-    openingBalance: number | null;
-    totalDebits: number;
-    totalCredits: number;
-    calculatedClosingBalance: number | null;
-    statementClosingBalance: number | null;
-    difference: number | null;
-    rowContinuityFailureCount: number;
-    status: 'PASS' | 'FAIL' | 'UNAVAILABLE';
-    [key: string]: unknown;
-  };
-  scopeDiagnostics: Record<string, unknown>;
-};
-
 type RawPdfReport = PdfExtractionReport & {
   template: PdfExtractionReport['template'] & { path?: string };
   source: PdfExtractionReport['source'] & { path?: string };
@@ -94,15 +37,43 @@ const MAX_PDF_BYTES = 25 * 1024 * 1024;
 const MAX_JSON_BYTES = 25 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+const engineFailure = (stderr: string) => {
+  try {
+    const failure = JSON.parse(stderr) as { code?: PdfExtractionErrorCode };
+    if (failure.code === 'NO_SELECTABLE_TEXT') {
+      return new PdfExtractionError(
+        'This PDF appears scanned or image-only. PDF Import V1 supports selectable-text statements only.',
+        failure.code
+      );
+    }
+    if (failure.code === 'TEMPLATE_MISMATCH') {
+      return new PdfExtractionError(
+        'This statement does not match the selected PDF template.',
+        failure.code
+      );
+    }
+  } catch {
+    // Older/local wrappers may still return plain stderr; retain safe fallback classification.
+  }
+  if (/does not match template/i.test(stderr)) {
+    return new PdfExtractionError(
+      'This statement does not match the selected PDF template.',
+      'TEMPLATE_MISMATCH'
+    );
+  }
+  if (/no module named ['"]?(pymupdf|fitz)/i.test(stderr)) {
+    return new PdfExtractionError(
+      'The local PDF extraction dependency is unavailable.',
+      'DEPENDENCY_MISSING'
+    );
+  }
+  return new PdfExtractionError('The PDF could not be extracted.', 'EXTRACTION_FAILED');
+};
+
 export class PdfExtractionError extends Error {
   constructor(
     message: string,
-    readonly code:
-      | 'INVALID_FILE'
-      | 'UNSUPPORTED_TEMPLATE'
-      | 'EXTRACTION_FAILED'
-      | 'EXTRACTION_TIMEOUT'
-      | 'INVALID_ENGINE_RESPONSE'
+    readonly code: PdfExtractionErrorCode
   ) {
     super(message);
     this.name = 'PdfExtractionError';
@@ -192,7 +163,7 @@ const runPythonEngine = async (
     };
     const timer = setTimeout(() => {
       child.kill();
-      fail(new PdfExtractionError('PDF extraction timed out.', 'EXTRACTION_TIMEOUT'));
+      fail(new PdfExtractionError('PDF extraction took too long and was stopped.', 'PROCESS_TIMEOUT'));
     }, timeoutMs);
 
     child.stdout.on('data', (chunk: Buffer) => {
@@ -207,14 +178,19 @@ const runPythonEngine = async (
     child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
     child.on('error', (error) => {
       clearTimeout(timer);
-      fail(new PdfExtractionError(`Could not start the PDF engine: ${error.message}`, 'EXTRACTION_FAILED'));
+      fail(new PdfExtractionError(
+        error.message.includes('ENOENT')
+          ? 'The local PDF extraction runtime is unavailable.'
+          : 'The PDF extraction process could not be started.',
+        error.message.includes('ENOENT') ? 'PYTHON_UNAVAILABLE' : 'EXTRACTION_FAILED'
+      ));
     });
     child.on('close', (code) => {
       clearTimeout(timer);
       if (settled) return;
       if (code !== 0) {
         const detail = Buffer.concat(stderr).toString('utf8').trim();
-        fail(new PdfExtractionError(detail || `PDF engine exited with code ${code}.`, 'EXTRACTION_FAILED'));
+        fail(engineFailure(detail));
         return;
       }
       try {
@@ -264,13 +240,26 @@ export const extractPdfStatement = async (
   try {
     await writeFile(inputPath, pdfBytes);
     await readFile(templatePath);
-    return await runPythonEngine(
+    const report = await runPythonEngine(
       inputPath,
       templatePath,
       template.id,
       sourceFilename,
       options?.timeoutMs ?? DEFAULT_TIMEOUT_MS
     );
+    if (!report.document.selectableText) {
+      throw new PdfExtractionError(
+        'This PDF appears scanned or image-only. PDF Import V1 supports selectable-text statements only.',
+        'NO_SELECTABLE_TEXT'
+      );
+    }
+    if (report.transactionTable.detectedPages.length === 0) {
+      throw new PdfExtractionError('The transaction table could not be found.', 'LEDGER_NOT_FOUND');
+    }
+    if (report.transactionTable.rowCount === 0) {
+      throw new PdfExtractionError('No transactions were extracted.', 'NO_TRANSACTIONS');
+    }
+    return report;
   } finally {
     await unlink(inputPath).catch(() => undefined);
     await rmdir(temporaryDirectory).catch(() => undefined);

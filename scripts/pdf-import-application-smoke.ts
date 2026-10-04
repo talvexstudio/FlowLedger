@@ -4,7 +4,9 @@ import path from 'node:path';
 import { NextRequest } from 'next/server';
 import { POST } from '../src/app/api/pdf-import/extract/route';
 import { GET } from '../src/app/api/pdf-import/templates/route';
-import type { PdfExtractionReport } from '../src/lib/server/pdf-extraction';
+import { prepareImportTransactions } from '../src/lib/import-processing';
+import { adaptPdfExtraction } from '../src/lib/pdf-import/adapter';
+import type { PdfExtractionReport } from '../src/lib/pdf-import/types';
 
 type Expected = {
   file: string;
@@ -37,8 +39,17 @@ const main = async () => {
   const fixtureFlag = process.argv.indexOf('--fixtures');
   assert.notEqual(fixtureFlag, -1, 'Usage: tsx scripts/pdf-import-application-smoke.ts --fixtures <directory>');
   const fixtureRoot = path.resolve(process.argv[fixtureFlag + 1] ?? '');
+  const baseUrlFlag = process.argv.indexOf('--base-url');
+  const baseUrl = baseUrlFlag === -1 ? null : (process.argv[baseUrlFlag + 1] ?? '').replace(/\/$/, '');
 
-  const templatesResponse = await GET();
+  const listTemplates = () => baseUrl
+    ? fetch(`${baseUrl}/api/pdf-import/templates`)
+    : GET();
+  const extract = (form: FormData) => baseUrl
+    ? fetch(`${baseUrl}/api/pdf-import/extract`, { method: 'POST', body: form })
+    : POST(new NextRequest('http://localhost/api/pdf-import/extract', { method: 'POST', body: form }));
+
+  const templatesResponse = await listTemplates();
   assert.equal(templatesResponse.status, 200);
   assert.deepEqual(
     (await templatesResponse.json()).map((template: { id: string }) => template.id),
@@ -49,19 +60,23 @@ const main = async () => {
   const unsupportedForm = new FormData();
   unsupportedForm.set('templateId', '../../arbitrary-template.json');
   unsupportedForm.set('file', new File([unsupportedBytes], cases[0].file, { type: 'application/pdf' }));
-  const unsupportedResponse = await POST(
-    new NextRequest('http://localhost/api/pdf-import/extract', { method: 'POST', body: unsupportedForm })
-  );
+  const unsupportedResponse = await extract(unsupportedForm);
   assert.equal(unsupportedResponse.status, 400);
   assert.equal((await unsupportedResponse.json()).code, 'UNSUPPORTED_TEMPLATE');
+
+  const mismatchForm = new FormData();
+  mismatchForm.set('templateId', 'cgd-current-account-v1');
+  mismatchForm.set('file', new File([unsupportedBytes], cases[0].file, { type: 'application/pdf' }));
+  const mismatchResponse = await extract(mismatchForm);
+  assert.equal(mismatchResponse.status, 422);
+  assert.equal((await mismatchResponse.json()).code, 'TEMPLATE_MISMATCH');
 
   for (const fixture of cases) {
     const bytes = await readFile(path.join(fixtureRoot, fixture.file));
     const form = new FormData();
     form.set('templateId', fixture.templateId);
     form.set('file', new File([bytes], fixture.file, { type: 'application/pdf' }));
-    const request = new NextRequest('http://localhost/api/pdf-import/extract', { method: 'POST', body: form });
-    const response = await POST(request);
+    const response = await extract(form);
     const body = await response.json() as PdfExtractionReport | { error: string };
     assert.equal(response.status, 200, 'error' in body ? body.error : fixture.file);
     assert.ok(!('error' in body));
@@ -78,6 +93,28 @@ const main = async () => {
     assert.equal(body.reconciliation.totalCredits, fixture.totalCredits);
     assert.equal(body.reconciliation.calculatedClosingBalance, fixture.closing);
     assert.equal(body.reconciliation.statementClosingBalance, fixture.closing);
+    const adapted = adaptPdfExtraction(body);
+    const prepared = prepareImportTransactions(
+      adapted.parsedFile.rows,
+      adapted.mapping,
+      'PDF',
+      { workspaceId: 'ws-pdf-smoke', accountId: 'acc-pdf-smoke' },
+      [],
+      []
+    );
+    assert.equal(adapted.parsedFile.rejectedRows.length, 0);
+    assert.equal(prepared.rejectedRows.length, 0);
+    assert.equal(prepared.transactions.length, fixture.rows);
+    assert.ok(prepared.transactions.every((transaction) => transaction.accountId === 'acc-pdf-smoke'));
+    assert.ok(prepared.transactions.every((transaction) => transaction.date instanceof Date));
+    const preparedDebits = prepared.transactions
+      .filter((transaction) => (transaction.amountBase ?? 0) < 0)
+      .reduce((total, transaction) => total + Math.abs(transaction.amountBase ?? 0), 0);
+    const preparedCredits = prepared.transactions
+      .filter((transaction) => (transaction.amountBase ?? 0) > 0)
+      .reduce((total, transaction) => total + (transaction.amountBase ?? 0), 0);
+    assert.ok(Math.abs(preparedDebits - fixture.totalDebits) < 0.001);
+    assert.ok(Math.abs(preparedCredits - fixture.totalCredits) < 0.001);
     const evidence = (body.scopeDiagnostics.excludedSectionEvidence ?? []) as ExclusionEvidence[];
     for (const anchor of fixture.exclusionAnchors ?? []) {
       const boundary = evidence.find((item) => item.anchor === anchor)?.occurrences[0];

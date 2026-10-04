@@ -3,7 +3,7 @@ import Papa, { type ParseResult } from 'papaparse';
 import type { Category, ClassificationRule, ImportTemplate, Subcategory, Transaction } from './types';
 import { applyRulesToTransaction } from './utils/rule-utils';
 
-export type ImportFileType = 'CSV' | 'XLSX';
+export type ImportFileType = 'CSV' | 'XLSX' | 'PDF';
 
 export const DEFAULT_IMPORT_DATE_FORMAT = 'dd/MM/yyyy';
 export const DEFAULT_DECIMAL_SEPARATOR = '.';
@@ -298,6 +298,18 @@ export const buildTransactionFromImportRow = (
   const reasons: string[] = [];
   const date = parseImportDate(values[mapping.dateField], mapping.dateFormat, fileType);
   if (!date) reasons.push('Date is missing or invalid.');
+  const postingDate = mapping.postingDateField && !isBlank(values[mapping.postingDateField])
+    ? parseImportDate(values[mapping.postingDateField], mapping.dateFormat, fileType)
+    : null;
+  const valueDate = mapping.valueDateField && !isBlank(values[mapping.valueDateField])
+    ? parseImportDate(values[mapping.valueDateField], mapping.dateFormat, fileType)
+    : null;
+  if (mapping.postingDateField && !isBlank(values[mapping.postingDateField]) && !postingDate) {
+    reasons.push('Posting date is invalid.');
+  }
+  if (mapping.valueDateField && !isBlank(values[mapping.valueDateField]) && !valueDate) {
+    reasons.push('Value date is invalid.');
+  }
 
   const rawDescriptionValue = values[mapping.descriptionField];
   const description = isBlank(rawDescriptionValue) ? '' : String(rawDescriptionValue).trim();
@@ -349,6 +361,8 @@ export const buildTransactionFromImportRow = (
       workspaceId: context.workspaceId,
       accountId: context.accountId,
       date,
+      ...(postingDate ? { postingDate } : {}),
+      ...(valueDate ? { valueDate } : {}),
       description,
       rawDescription,
       amountOriginal: amount,

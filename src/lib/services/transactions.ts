@@ -26,6 +26,8 @@ export const getTransactions = async (workspaceId: string): Promise<Transaction[
             id: doc.id, 
             ...data,
             date: new Date(data.date), // Ensure date is a Date object
+            ...(data.postingDate ? { postingDate: new Date(data.postingDate) } : {}),
+            ...(data.valueDate ? { valueDate: new Date(data.valueDate) } : {}),
         } as Transaction;
     });
 }
