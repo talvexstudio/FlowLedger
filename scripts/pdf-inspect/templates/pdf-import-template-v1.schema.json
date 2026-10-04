@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flowledger.local/schemas/pdf-import-template-v1.schema.json",
+  "title": "FlowLedger PdfImportTemplate V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "identification",
+    "section",
+    "columns",
+    "row",
+    "amounts",
+    "dates",
+    "context",
+    "reconciliation"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "lineGroupingTolerance": { "type": "number", "minimum": 0 },
+    "identification": {
+      "type": "object",
+      "required": ["requiredAnchors"],
+      "properties": {
+        "requiredAnchors": { "$ref": "#/$defs/stringArray" },
+        "anyAnchors": { "$ref": "#/$defs/stringArray" },
+        "excludedAnchors": { "$ref": "#/$defs/stringArray" }
+      }
+    },
+    "section": {
+      "type": "object",
+      "required": ["startAnchors", "tableHeader", "endAnchors"],
+      "properties": {
+        "startAnchors": { "$ref": "#/$defs/stringArray" },
+        "startAnchorMode": { "enum": ["ALL", "ANY"] },
+        "tableHeader": {
+          "type": "object",
+          "required": ["requiredTokenCounts"],
+          "properties": {
+            "requiredTokenCounts": {
+              "type": "object",
+              "additionalProperties": { "type": "integer", "minimum": 1 }
+            },
+            "windowHeight": { "type": "number", "minimum": 0 }
+          }
+        },
+        "endAnchors": { "$ref": "#/$defs/stringArray" },
+        "continuationMarkers": { "$ref": "#/$defs/stringArray" },
+        "excludedLineMarkers": { "$ref": "#/$defs/stringArray" },
+        "rowStartOffset": { "type": "number" }
+      }
+    },
+    "columns": {
+      "type": "object",
+      "required": ["mode", "ranges"],
+      "properties": {
+        "mode": { "const": "FIXED_RANGES" },
+        "ranges": {
+          "type": "object",
+          "propertyNames": {
+            "enum": ["postingDate", "valueDate", "description", "signedAmount", "debit", "credit", "balance"]
+          },
+          "additionalProperties": { "$ref": "#/$defs/range" }
+        }
+      }
+    },
+    "row": {
+      "type": "object",
+      "required": ["requiredRoles", "datePatterns"],
+      "properties": {
+        "requiredRoles": { "$ref": "#/$defs/stringArray" },
+        "datePatterns": { "type": "object", "additionalProperties": { "type": "string" } },
+        "linePattern": { "type": "string" },
+        "ignoredMarkers": { "$ref": "#/$defs/stringArray" }
+      }
+    },
+    "amounts": {
+      "type": "object",
+      "required": ["model", "rawPattern", "numberFormat"],
+      "properties": {
+        "model": { "enum": ["SIGNED_AMOUNT", "DEBIT_CREDIT"] },
+        "rawPattern": { "type": "string" },
+        "numberFormat": {
+          "type": "object",
+          "required": ["decimalSeparator", "thousandsSeparators"],
+          "properties": {
+            "decimalSeparator": { "type": "string", "minLength": 1, "maxLength": 1 },
+            "thousandsSeparators": { "$ref": "#/$defs/stringArray" }
+          }
+        }
+      }
+    },
+    "dates": {
+      "type": "object",
+      "required": ["model", "primaryRole", "rowPattern"],
+      "properties": {
+        "model": { "enum": ["FULL_DATE", "ABBREVIATED_WITH_STATEMENT_PERIOD"] },
+        "primaryRole": { "enum": ["postingDate", "valueDate"] },
+        "rowPattern": { "type": "string" },
+        "pythonFormat": { "type": "string" },
+        "yearSource": { "enum": ["from", "to"] },
+        "statementPeriodFormat": { "type": "string" }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["mode"],
+        "properties": {
+          "mode": { "enum": ["DOCUMENT_REGEX", "LINE_MARKER_AMOUNT"] },
+          "pattern": { "type": "string" },
+          "group": { "type": "integer", "minimum": 1 },
+          "anchors": { "$ref": "#/$defs/stringArray" },
+          "valueTokenPattern": { "type": "string" },
+          "minimumX": { "type": "number" },
+          "valueSelection": { "enum": ["FIRST", "LAST"] },
+          "occurrence": { "enum": ["FIRST", "LAST"] }
+        }
+      }
+    },
+    "reconciliation": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["FULL_RECONCILIATION", "OPEN_CLOSE_RECONCILIATION", "NONE"] },
+        "tolerance": { "type": "string" }
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "properties": {
+        "excludedSectionAnchors": { "$ref": "#/$defs/stringArray" }
+      }
+    }
+  },
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "range": {
+      "type": "array",
+      "prefixItems": [{ "type": "number" }, { "type": "number" }],
+      "minItems": 2,
+      "maxItems": 2
+    }
+  }
+}

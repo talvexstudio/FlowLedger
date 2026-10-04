@@ -1,0 +1,103 @@
+{
+  "$schema": "./pdf-import-template-v1.schema.json",
+  "schemaVersion": 1,
+  "id": "activobank-current-account-v1",
+  "name": "ActivoBank Current Account",
+  "lineGroupingTolerance": 2.5,
+  "identification": {
+    "requiredAnchors": ["Banco ActivoBank", "DEPOSITO A ORDEM", "CONTA SIMPLES", "EXTRATO DE"],
+    "anyAnchors": [],
+    "excludedAnchors": []
+  },
+  "section": {
+    "startAnchors": ["CONTA SIMPLES", "EXTRATO DE"],
+    "startAnchorMode": "ALL",
+    "tableHeader": {
+      "requiredTokenCounts": {
+        "DATA": 2,
+        "LANC": 1,
+        "VALOR": 1,
+        "DESCRITIVO": 1,
+        "DEBITO": 1,
+        "CREDITO": 1,
+        "SALDO": 1
+      },
+      "windowHeight": 24
+    },
+    "endAnchors": ["SALDO FINAL"],
+    "continuationMarkers": ["A TRANSPORTAR", "TRANSPORTE"],
+    "excludedLineMarkers": ["Banco ActivoBank"],
+    "rowStartOffset": 1
+  },
+  "columns": {
+    "mode": "FIXED_RANGES",
+    "ranges": {
+      "postingDate": [40.0, 83.28],
+      "valueDate": [83.28, 114.3],
+      "description": [114.3, 346.69],
+      "debit": [346.69, 424.64],
+      "credit": [424.64, 518.36],
+      "balance": [518.36, 575.0]
+    }
+  },
+  "row": {
+    "requiredRoles": ["postingDate", "valueDate", "description", "balance"],
+    "datePatterns": {
+      "postingDate": "^\\d{1,2}\\.\\d{2}$",
+      "valueDate": "^\\d{1,2}\\.\\d{2}$"
+    },
+    "ignoredMarkers": ["SALDO INICIAL", "A TRANSPORTAR", "TRANSPORTE"]
+  },
+  "amounts": {
+    "model": "DEBIT_CREDIT",
+    "rawPattern": "^-?[\\d ]+\\.\\d{2}$",
+    "numberFormat": {
+      "decimalSeparator": ".",
+      "thousandsSeparators": [" "]
+    }
+  },
+  "dates": {
+    "model": "ABBREVIATED_WITH_STATEMENT_PERIOD",
+    "primaryRole": "postingDate",
+    "rowPattern": "^(?P<month>\\d{1,2})\\.(?P<day>\\d{2})$",
+    "yearSource": "from",
+    "statementPeriodFormat": "%Y/%m/%d"
+  },
+  "context": {
+    "statementPeriod": {
+      "mode": "DOCUMENT_REGEX",
+      "pattern": "EXTRATO\\s+DE\\s+(?P<from>\\d{4}/\\d{2}/\\d{2})\\s+A\\s+(?P<to>\\d{4}/\\d{2}/\\d{2})"
+    },
+    "openingBalance": {
+      "mode": "LINE_MARKER_AMOUNT",
+      "anchors": ["SALDO INICIAL"],
+      "valueTokenPattern": "^-?[\\d ]+\\.\\d{2}$",
+      "minimumX": 500,
+      "valueSelection": "LAST",
+      "occurrence": "FIRST"
+    },
+    "closingBalance": {
+      "mode": "LINE_MARKER_AMOUNT",
+      "anchors": ["SALDO FINAL"],
+      "valueTokenPattern": "^-?[\\d ]+\\.\\d{2}$",
+      "minimumX": 500,
+      "valueSelection": "LAST",
+      "occurrence": "LAST"
+    },
+    "currency": {
+      "mode": "DOCUMENT_REGEX",
+      "pattern": "MOEDA:\\s*(?P<value>[A-Z]{3})"
+    },
+    "accountIdentifier": {
+      "mode": "DOCUMENT_REGEX",
+      "pattern": "CONTA\\s+SIMPLES\\s+N\\.\\s*(?P<value>\\d+)"
+    }
+  },
+  "reconciliation": {
+    "mode": "FULL_RECONCILIATION",
+    "tolerance": "0.01"
+  },
+  "diagnostics": {
+    "excludedSectionAnchors": ["RESUMO DAS CONTAS", "SEGUROS", "TRANSACOES EM MOEDA DIFERENTE DE EUR"]
+  }
+}

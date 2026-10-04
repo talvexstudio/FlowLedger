@@ -1,0 +1,100 @@
+{
+  "$schema": "./pdf-import-template-v1.schema.json",
+  "schemaVersion": 1,
+  "id": "cgd-current-account-v1",
+  "name": "CGD Current Account",
+  "lineGroupingTolerance": 2.5,
+  "identification": {
+    "requiredAnchors": ["Caixa Geral de Depósitos", "Extrato Global", "CONTA EXTRACTO", "Saldo Contabilístico"],
+    "anyAnchors": [],
+    "excludedAnchors": []
+  },
+  "section": {
+    "startAnchors": ["Património", "Depósitos à Ordem", "CONTA EXTRACTO"],
+    "startAnchorMode": "ALL",
+    "tableHeader": {
+      "requiredTokenCounts": {
+        "DATA": 2,
+        "MOV": 1,
+        "VALOR": 2,
+        "DESCRICAO": 1,
+        "SALDO": 1,
+        "CONTABILISTICO": 1
+      },
+      "windowHeight": 8
+    },
+    "endAnchors": ["Saldo contabilístico"],
+    "continuationMarkers": [],
+    "excludedLineMarkers": ["caixadirecta"],
+    "rowStartOffset": 0
+  },
+  "columns": {
+    "mode": "FIXED_RANGES",
+    "ranges": {
+      "postingDate": [40.0, 100.0],
+      "valueDate": [100.0, 151.0],
+      "description": [151.0, 425.0],
+      "signedAmount": [425.0, 478.0],
+      "balance": [478.0, 575.0]
+    }
+  },
+  "row": {
+    "requiredRoles": ["postingDate", "valueDate", "description", "signedAmount", "balance"],
+    "datePatterns": {
+      "postingDate": "^\\d{4}-\\d{2}-\\d{2}$",
+      "valueDate": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "ignoredMarkers": ["Saldo anterior", "Saldo contabilístico", "Saldo disponível"]
+  },
+  "amounts": {
+    "model": "SIGNED_AMOUNT",
+    "rawPattern": "^-?[\\d.]+,\\d{2}$",
+    "numberFormat": {
+      "decimalSeparator": ",",
+      "thousandsSeparators": [".", " "]
+    }
+  },
+  "dates": {
+    "model": "FULL_DATE",
+    "primaryRole": "postingDate",
+    "rowPattern": "^\\d{4}-\\d{2}-\\d{2}$",
+    "pythonFormat": "%Y-%m-%d"
+  },
+  "context": {
+    "statementPeriod": {
+      "mode": "DOCUMENT_REGEX",
+      "pattern": "Período\\s+(?P<from>\\d{4}-\\d{2}-\\d{2})\\s+a\\s+(?P<to>\\d{4}-\\d{2}-\\d{2})"
+    },
+    "openingBalance": {
+      "mode": "LINE_MARKER_AMOUNT",
+      "anchors": ["Saldo anterior"],
+      "valueTokenPattern": "^-?[\\d.]+,\\d{2}$",
+      "minimumX": 500,
+      "valueSelection": "LAST",
+      "occurrence": "FIRST"
+    },
+    "closingBalance": {
+      "mode": "LINE_MARKER_AMOUNT",
+      "anchors": ["Saldo contabilístico"],
+      "valueTokenPattern": "^-?[\\d.]+,\\d{2}$",
+      "minimumX": 500,
+      "valueSelection": "LAST",
+      "occurrence": "LAST"
+    },
+    "currency": {
+      "mode": "DOCUMENT_REGEX",
+      "pattern": "Moeda\\s+(?P<value>[A-Z]{3})"
+    },
+    "accountIdentifier": {
+      "mode": "DOCUMENT_REGEX",
+      "pattern": "CONTA\\s+EXTRACTO\\s+(?P<value>\\d+(?:\\.\\d+)+)"
+    }
+  },
+  "reconciliation": {
+    "mode": "FULL_RECONCILIATION",
+    "tolerance": "0.01"
+  },
+  "diagnostics": {
+    "excludedSectionAnchors": ["Crédito Imobiliário", "Prestação Nº", "Agenda - Prestação Subsequente", "MULTI-OPCOES"]
+  }
+}
