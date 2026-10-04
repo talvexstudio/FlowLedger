@@ -24,6 +24,8 @@ export const accountSchema = z.object({
   openingBalance: z.number().default(0),
 });
 
+export type AccountFormValues = z.infer<typeof accountSchema>;
+
 export const workspaceSchema = z.object({
     name: z.string().min(1, 'Workspace name is required.'),
 });

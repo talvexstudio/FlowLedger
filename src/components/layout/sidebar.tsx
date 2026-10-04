@@ -20,9 +20,17 @@ import {
   Upload,
   Settings,
   CircleHelp,
+  type LucideIcon,
 } from 'lucide-react';
 
-const menuItems = [
+type MenuItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  disabled?: boolean;
+};
+
+const menuItems: MenuItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/accounts', label: 'Accounts', icon: Wallet },
   { href: '/transactions', label: 'Transactions', icon: ArrowRightLeft },

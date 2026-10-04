@@ -11,11 +11,10 @@ import { useToast } from '@/hooks/use-toast';
 import { apiArchiveAccount, apiDeleteAccount, apiSaveAccount } from '@/lib/api';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { accountSchema } from '@/lib/schemas';
+import { accountSchema, type AccountFormValues } from '@/lib/schemas';
 
 export default function AccountsPage() {
   const { accounts, transactions, workspaceId, reloadAccounts } = useFlowLedger();
@@ -105,7 +104,7 @@ export default function AccountsPage() {
     }
   }, [workspaceId, toast, reloadAccounts]);
 
-  const form = useForm({
+  const form = useForm<AccountFormValues>({
     resolver: zodResolver(accountSchema),
     defaultValues: {
       name: '',
@@ -137,7 +136,7 @@ export default function AccountsPage() {
     }
   }, [editingAccount, isSheetOpen, form]);
 
-  const onSubmit = async (data: z.infer<typeof accountSchema>) => {
+  const onSubmit = async (data: AccountFormValues) => {
     try {
       await handleSaveAccount({ id: editingAccount?.id, ...data });
     } catch (error) {

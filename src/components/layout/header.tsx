@@ -17,7 +17,6 @@ import {
 import {
   Avatar,
   AvatarFallback,
-  AvatarImage,
 } from '@/components/ui/avatar';
 import { ChevronsUpDown, LogOut, User } from 'lucide-react';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
@@ -25,7 +24,7 @@ import Link from 'next/link';
 
 
 export function AppHeader() {
-  const { workspaces, workspaceId, setWorkspaceId, user } = useFlowLedger();
+  const { workspaces, workspaceId, setWorkspaceId } = useFlowLedger();
   
   const currentWorkspace = workspaces.find(w => w.id === workspaceId);
 
@@ -61,8 +60,7 @@ export function AppHeader() {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="rounded-full">
               <Avatar>
-                <AvatarImage src={user?.photoURL || ''} alt={user?.displayName || 'User'} />
-                <AvatarFallback>{user?.displayName?.charAt(0) || 'U'}</AvatarFallback>
+                <AvatarFallback>U</AvatarFallback>
               </Avatar>
             </Button>
           </DropdownMenuTrigger>
