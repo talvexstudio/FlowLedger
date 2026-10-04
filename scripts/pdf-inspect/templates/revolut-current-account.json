@@ -1,0 +1,111 @@
+{
+  "$schema": "./pdf-import-template-v1.schema.json",
+  "schemaVersion": 1,
+  "id": "revolut-current-account-v1",
+  "name": "Revolut Current Account",
+  "lineGroupingTolerance": 2.5,
+  "identification": {
+    "requiredAnchors": ["Extrato de EUR", "Revolut Bank UAB", "Resumo do saldo"],
+    "anyAnchors": [],
+    "excludedAnchors": []
+  },
+  "section": {
+    "startAnchors": ["Operações da conta de"],
+    "startAnchorMode": "ALL",
+    "tableHeader": {
+      "requiredTokenCounts": {
+        "DATA": 1,
+        "DESCRICAO": 1,
+        "DINHEIRO": 2,
+        "RETIRADO": 1,
+        "RECEBIDO": 1,
+        "SALDO": 1
+      },
+      "windowHeight": 8
+    },
+    "endAnchors": ["Revertido de", "Transações de Cofres Pessoais e de Grupo"],
+    "continuationMarkers": [],
+    "excludedLineMarkers": [],
+    "rowStartOffset": 1
+  },
+  "columns": {
+    "mode": "FIXED_RANGES",
+    "ranges": {
+      "postingDate": [35.0, 110.0],
+      "description": [110.0, 320.0],
+      "debit": [320.0, 410.0],
+      "credit": [410.0, 500.0],
+      "balance": [500.0, 575.0]
+    }
+  },
+  "row": {
+    "requiredRoles": ["postingDate", "description", "balance"],
+    "datePatterns": {
+      "postingDate": "^\\d{2}/\\d{2}/\\d{4}$"
+    },
+    "ignoredMarkers": []
+  },
+  "amounts": {
+    "model": "DEBIT_CREDIT",
+    "rawPattern": "^-?[\\d.]+,\\d{2}€$",
+    "numberFormat": {
+      "decimalSeparator": ",",
+      "thousandsSeparators": [".", " ", "€"]
+    }
+  },
+  "dates": {
+    "model": "FULL_DATE",
+    "primaryRole": "postingDate",
+    "rowPattern": "^\\d{2}/\\d{2}/\\d{4}$",
+    "pythonFormat": "%d/%m/%Y"
+  },
+  "context": {
+    "statementPeriod": {
+      "mode": "DOCUMENT_REGEX",
+      "pattern": "Operações\\s+da\\s+conta\\s+de\\s+(?P<from>\\d{1,2}\\s+de\\s+\\S+\\s+de\\s+\\d{4})\\s+a\\s+(?P<to>\\d{1,2}\\s+de\\s+\\S+\\s+de\\s+\\d{4})"
+    },
+    "openingBalance": {
+      "mode": "LINE_MARKER_AMOUNT",
+      "anchors": ["Conta (Conta Corrente)"],
+      "valueTokenPattern": "^-?[\\d.]+,\\d{2}€$",
+      "minimumX": 240,
+      "valueSelection": "FIRST",
+      "occurrence": "FIRST"
+    },
+    "summaryDebits": {
+      "mode": "LINE_MARKER_AMOUNT",
+      "anchors": ["Conta (Conta Corrente)"],
+      "valueTokenPattern": "^-?[\\d.]+,\\d{2}€$",
+      "minimumX": 320,
+      "valueSelection": "FIRST",
+      "occurrence": "FIRST"
+    },
+    "summaryCredits": {
+      "mode": "LINE_MARKER_AMOUNT",
+      "anchors": ["Conta (Conta Corrente)"],
+      "valueTokenPattern": "^-?[\\d.]+,\\d{2}€$",
+      "minimumX": 400,
+      "valueSelection": "FIRST",
+      "occurrence": "FIRST"
+    },
+    "closingBalance": {
+      "mode": "LINE_MARKER_AMOUNT",
+      "anchors": ["Conta (Conta Corrente)"],
+      "valueTokenPattern": "^-?[\\d.]+,\\d{2}€$",
+      "minimumX": 500,
+      "valueSelection": "LAST",
+      "occurrence": "FIRST"
+    },
+    "currency": {
+      "mode": "DOCUMENT_REGEX",
+      "pattern": "Extrato\\s+de\\s+(?P<value>[A-Z]{3})"
+    }
+  },
+  "reconciliation": {
+    "mode": "FULL_RECONCILIATION",
+    "tolerance": "0.01"
+  },
+  "diagnostics": {
+    "excludedSectionAnchors": ["Revertido de", "Transações de Cofres Pessoais e de Grupo"]
+  }
+}
