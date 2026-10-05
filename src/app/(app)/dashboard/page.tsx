@@ -23,6 +23,7 @@ import {
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { apiSeedDemoData } from '@/lib/api';
 import { buildRangeOverviewData, buildMonthlyOverviewData, toDate } from '@/app/(app)/dashboard/utils';
+import { isConfirmedExpense, isConfirmedIncome } from '@/lib/transaction-reporting';
 
 export default function DashboardPage() {
   const { toast } = useToast();
@@ -105,11 +106,11 @@ export default function DashboardPage() {
 
   const { income, expenses, net, savingsRate } = useMemo(() => {
     const incomeTotal = rangeTransactions
-      .filter((t) => t.type === 'Income')
+      .filter(isConfirmedIncome)
       .reduce((sum, t) => sum + t.amountBase, 0);
 
     const expenseTotal = rangeTransactions
-      .filter((t) => t.type === 'Expense')
+      .filter(isConfirmedExpense)
       .reduce((sum, t) => sum + Math.abs(t.amountBase), 0);
 
     const netBalance = incomeTotal - expenseTotal;

@@ -40,6 +40,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  getInternalTransferDisplay,
+  getInternalTransferPairingStatus,
+  matchesCategoryFilter,
+} from '@/lib/internal-transfer';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -73,7 +78,7 @@ export function TransactionsDataTable({ onEdit, onConfirm, onDelete, onBulkDelet
       data = data.filter(t => accountFilter.includes(t.accountId));
     }
     if (categoryFilter.length > 0) {
-      data = data.filter(t => t.categoryId && categoryFilter.includes(t.categoryId));
+      data = data.filter(t => matchesCategoryFilter(t, categoryFilter));
     }
     if (dateRange?.from) {
       data = data.filter(t => new Date(t.date) >= dateRange.from!);
@@ -312,18 +317,24 @@ export function TransactionsDataTable({ onEdit, onConfirm, onDelete, onBulkDelet
                             variant="ghost"
                             size="sm"
                             className="w-fit h-auto px-2 py-0.5 text-xs border border-blue-400 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950"
-                            onClick={() => {
-                              // TODO: Auto-link as internal transfer
-                              console.log('Link potential transfer:', t.id, t.potentialTransferMatch?.existingTransaction.id);
-                            }}
+                            onClick={() => onEdit(t)}
                           >
-                            Link as transfer →
+                            Review transfer match →
                           </Button>
                         )}
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={t.isInternalTransfer ? "secondary" : "outline"}>{getCategoryName(t.categoryId)}</Badge>
+                      <div className="flex flex-col items-start gap-1">
+                        <Badge variant={t.type === 'InternalTransfer' ? "secondary" : "outline"}>
+                          {getInternalTransferDisplay(t, accounts) ?? getCategoryName(t.categoryId)}
+                        </Badge>
+                        {getInternalTransferPairingStatus(t) && (
+                          <span className="text-xs text-muted-foreground">
+                            {getInternalTransferPairingStatus(t)}
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className={`text-right font-semibold ${t.amountBase > 0 ? 'text-green-600 dark:text-green-400' : ''}`}>
                       {new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(t.amountBase)}

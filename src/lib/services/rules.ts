@@ -1,5 +1,6 @@
 import { db } from "./firestore";
 import type { Category, ClassificationRule, Subcategory, Transaction } from "../types";
+import { normalizeTransactionTypeFields } from '../internal-transfer';
 
 const rulesCollection = (workspaceId: string) => `workspaces/${workspaceId}/rules`;
 
@@ -38,6 +39,7 @@ export const applyRulesToTransaction = (
   rules: ClassificationRule[]
 ): Partial<Transaction> => {
   let result = { ...tx };
+  let ruleAssignedInternalTransfer = false;
   const desc = (tx.rawDescription || tx.description || "").toLowerCase();
   const amount = Math.abs(tx.amountBase ?? 0);
 
@@ -56,6 +58,7 @@ export const applyRulesToTransaction = (
     if (typeof m.maxAmount === "number" && amount > m.maxAmount) {
       continue;
     }
+    if (rule.action.type === 'InternalTransfer') ruleAssignedInternalTransfer = true;
 
     result = {
       ...result,
@@ -65,7 +68,10 @@ export const applyRulesToTransaction = (
     };
   }
 
-  return result;
+  const normalized = normalizeTransactionTypeFields(result);
+  return ruleAssignedInternalTransfer
+    ? { ...normalized, needsReview: true }
+    : normalized;
 };
 
 const DESCRIPTION_STOPWORDS = new Set([
@@ -155,6 +161,18 @@ export const applyRuleClassificationToTransaction = (
 
   if (!updated.type && rule.action.type) {
     updated.type = rule.action.type;
+  }
+
+  const normalized = normalizeTransactionTypeFields({ ...tx, ...updated });
+  if (normalized.type === 'InternalTransfer') {
+    return {
+      id: tx.id,
+      type: 'InternalTransfer',
+      categoryId: undefined,
+      subcategoryId: undefined,
+      isInternalTransfer: true,
+      needsReview: true,
+    };
   }
 
   updated.needsReview = false;

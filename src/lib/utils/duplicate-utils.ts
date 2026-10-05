@@ -9,6 +9,15 @@ export type DuplicateMatch = {
   matchScore: number;
   reasons: string[];
   matchType: 'duplicate' | 'potential_transfer';
+  calendarDayDifference?: number;
+};
+
+export type PotentialTransferOptions = {
+  workspaceId?: string;
+  counterpartAccountId?: string;
+  sourceTransactionId?: string;
+  excludeLinked?: boolean;
+  maxCalendarDayDifference?: number;
 };
 
 export type PotentialTransfer = {
@@ -50,6 +59,12 @@ const getCalendarDateKey = (value: Date | string) => {
 };
 
 const normalizeAmountToCents = (amount: number) => Math.round(amount * 100);
+
+const getCalendarDayNumber = (value: Date | string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY_MS;
+};
 
 /**
  * Find potential duplicates for a new transaction among existing ones.
@@ -106,43 +121,51 @@ export function findDuplicateTransactions(
  */
 export function findPotentialTransfers(
   newTx: Partial<Transaction>,
-  existingTransactions: Transaction[]
+  existingTransactions: Transaction[],
+  options: PotentialTransferOptions = {}
 ): DuplicateMatch[] {
   if (!newTx.accountId || !newTx.date || typeof newTx.amountBase !== 'number') {
     return [];
   }
 
-  const newDate = new Date(newTx.date).getTime();
-  const newAmount = newTx.amountBase;
+  const newDate = getCalendarDayNumber(newTx.date);
+  const newAmount = normalizeAmountToCents(newTx.amountBase);
+  const maxCalendarDayDifference = options.maxCalendarDayDifference ?? 1;
+  if (newDate === null || newAmount === 0) return [];
   const matches: DuplicateMatch[] = [];
 
   for (const existing of existingTransactions) {
+    if (options.sourceTransactionId && existing.id === options.sourceTransactionId) continue;
+    if (options.workspaceId && existing.workspaceId !== options.workspaceId) continue;
+    if (options.counterpartAccountId && existing.accountId !== options.counterpartAccountId) continue;
+    if (options.excludeLinked && existing.linkedTransactionId) continue;
+
     // Must be different account
     if (existing.accountId === newTx.accountId) continue;
 
-    // Must be same day (not 3 day window)
-    const existingDate = new Date(existing.date).getTime();
-    const dayDiff = Math.abs(newDate - existingDate) / DAY_MS;
-    if (dayDiff > 1) continue;
+    const existingDate = getCalendarDayNumber(existing.date);
+    if (existingDate === null) continue;
+    const dayDiff = Math.abs(newDate - existingDate);
+    if (dayDiff > maxCalendarDayDifference) continue;
 
-    // Must be opposite-signed amounts (within ±0.01 tolerance)
-    // e.g., -100 in account A and +100 in account B
-    const amountDiff = Math.abs(Math.abs(existing.amountBase) - Math.abs(newAmount));
-    if (amountDiff > 0.01) continue;
+    const existingAmount = normalizeAmountToCents(existing.amountBase);
+    if (existingAmount === 0 || Math.abs(existingAmount) !== Math.abs(newAmount)) continue;
 
-    if ((existing.amountBase > 0 && newAmount > 0) || (existing.amountBase < 0 && newAmount < 0)) {
-      continue;
-    }
+    if (Math.sign(existingAmount) === Math.sign(newAmount)) continue;
 
-    const matchScore = 1 - (dayDiff / 1); // Perfect score for same day, decreases over time
+    const matchScore = dayDiff === 0 ? 1 : 0;
 
     matches.push({
       existingTransaction: existing,
       matchScore,
-      reasons: ['opposite_amounts', 'different_accounts', 'same_day'],
-      matchType: 'potential_transfer'
+      reasons: ['opposite_amounts', 'different_accounts', dayDiff === 0 ? 'same_day' : 'within_one_day'],
+      matchType: 'potential_transfer',
+      calendarDayDifference: dayDiff,
     });
   }
 
-  return matches.sort((a, b) => b.matchScore - a.matchScore);
+  return matches.sort((a, b) =>
+    (a.calendarDayDifference ?? 0) - (b.calendarDayDifference ?? 0) ||
+    a.existingTransaction.id.localeCompare(b.existingTransaction.id)
+  );
 }

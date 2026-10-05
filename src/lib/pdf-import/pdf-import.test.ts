@@ -260,6 +260,7 @@ test('PDF source type reaches import session and duplicate detection remains act
     }),
     deleteSession: async () => undefined,
     getExistingTransactions: async () => [existing],
+    getAccounts: async () => [],
     saveTransaction: async (workspaceId, transaction) => ({
       ...transaction,
       id: 'pdf-transaction',

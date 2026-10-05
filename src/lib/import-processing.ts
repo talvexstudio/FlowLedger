@@ -1,7 +1,8 @@
 import { parse } from 'date-fns';
 import Papa, { type ParseResult } from 'papaparse';
-import type { Category, ClassificationRule, ImportTemplate, Subcategory, Transaction } from './types';
+import type { Account, Category, ClassificationRule, ImportTemplate, Subcategory, Transaction } from './types';
 import { applyRulesToTransaction } from './utils/rule-utils';
+import { validateInternalTransfer } from './internal-transfer';
 
 export type ImportFileType = 'CSV' | 'XLSX' | 'PDF';
 
@@ -255,8 +256,13 @@ export const parseImportAmount = (
 
 export const isTransactionSufficientlyClassified = (
   transaction: Partial<Transaction>,
-  categories: ImportCategories
+  categories: ImportCategories,
+  accounts: Account[] = [],
+  workspaceId: string = transaction.workspaceId ?? ''
 ) => {
+  if (transaction.type === 'InternalTransfer') {
+    return validateInternalTransfer(transaction, accounts, workspaceId).valid;
+  }
   if (transaction.type !== 'Expense' && transaction.type !== 'Income') return true;
   if (!transaction.categoryId) return false;
   const category = categories.find((candidate) => candidate.id === transaction.categoryId);

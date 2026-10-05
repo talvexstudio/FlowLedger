@@ -1,5 +1,6 @@
 import { differenceInDays, eachDayOfInterval, eachMonthOfInterval, format, isSameDay, isSameMonth, startOfMonth, subDays, subMonths } from 'date-fns';
 import type { Transaction } from '@/lib/types';
+import { isConfirmedExpense, isConfirmedIncome } from '@/lib/transaction-reporting';
 
 export function getLast30DaysRange(): { start: Date; end: Date } {
   const end = new Date();
@@ -39,11 +40,11 @@ export function buildMonthlyOverviewData(transactions: Transaction[]): MonthlyOv
     });
 
     const income = monthTransactions
-      .filter((t) => t.type === 'Income')
+      .filter(isConfirmedIncome)
       .reduce((sum, t) => sum + t.amountBase, 0);
 
     const expenses = monthTransactions
-      .filter((t) => t.type === 'Expense')
+      .filter(isConfirmedExpense)
       .reduce((sum, t) => sum + Math.abs(t.amountBase), 0);
 
     return {
@@ -71,8 +72,8 @@ export function buildRangeOverviewData(
         const date = toDate(t.date);
         return date ? isSameDay(date, day) : false;
       });
-      const income = dayTxs.filter(t => t.type === 'Income').reduce((s, t) => s + t.amountBase, 0);
-      const expenses = dayTxs.filter(t => t.type === 'Expense').reduce((s, t) => s + Math.abs(t.amountBase), 0);
+      const income = dayTxs.filter(isConfirmedIncome).reduce((s, t) => s + t.amountBase, 0);
+      const expenses = dayTxs.filter(isConfirmedExpense).reduce((s, t) => s + Math.abs(t.amountBase), 0);
       return { year: day.getFullYear(), month: day.getMonth(), label: format(day, 'MMM d'), income, expenses };
     });
   }
@@ -85,8 +86,8 @@ export function buildRangeOverviewData(
         const date = toDate(t.date);
         return date ? isSameMonth(date, monthDate) : false;
       });
-      const income = monthTxs.filter(t => t.type === 'Income').reduce((s, t) => s + t.amountBase, 0);
-      const expenses = monthTxs.filter(t => t.type === 'Expense').reduce((s, t) => s + Math.abs(t.amountBase), 0);
+      const income = monthTxs.filter(isConfirmedIncome).reduce((s, t) => s + t.amountBase, 0);
+      const expenses = monthTxs.filter(isConfirmedExpense).reduce((s, t) => s + Math.abs(t.amountBase), 0);
       return { year: monthDate.getFullYear(), month: monthDate.getMonth(), label: format(monthDate, 'MMM yy'), income, expenses };
     });
   }
@@ -101,8 +102,8 @@ export function buildRangeOverviewData(
       return date ? quarterMonths.some(m => isSameMonth(date, m)) : false;
     });
     const firstMonth = quarterMonths[0];
-    const income = quarterTxs.filter(t => t.type === 'Income').reduce((s, t) => s + t.amountBase, 0);
-    const expenses = quarterTxs.filter(t => t.type === 'Expense').reduce((s, t) => s + Math.abs(t.amountBase), 0);
+    const income = quarterTxs.filter(isConfirmedIncome).reduce((s, t) => s + t.amountBase, 0);
+    const expenses = quarterTxs.filter(isConfirmedExpense).reduce((s, t) => s + Math.abs(t.amountBase), 0);
     quarters.push({ year: firstMonth.getFullYear(), month: firstMonth.getMonth(), label: `Q${Math.floor(i / 3) + 1} ${firstMonth.getFullYear()}`, income, expenses });
   }
   return quarters;

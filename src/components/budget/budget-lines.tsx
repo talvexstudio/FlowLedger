@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import { Edit, Trash2 } from 'lucide-react';
 import type { BudgetLine, Category, Subcategory, Transaction } from '@/lib/types';
+import { isConfirmedExpense } from '@/lib/transaction-reporting';
 
 interface BudgetRowItem {
   categoryId: string;
@@ -46,8 +47,7 @@ export function BudgetLines({
       const spentThisMonth = transactions
         .filter(t =>
           t.categoryId === category.id &&
-          t.type === 'Expense' &&
-          !t.needsReview &&
+          isConfirmedExpense(t) &&
           new Date(t.date).getMonth() === selectedMonth &&
           new Date(t.date).getFullYear() === selectedYear
         )

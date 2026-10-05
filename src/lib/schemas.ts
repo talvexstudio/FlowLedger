@@ -12,6 +12,28 @@ export const transactionSchema = z.object({
   categoryId: z.string().optional(),
   subcategoryId: z.string().optional(),
   createRule: z.boolean().default(false),
+}).superRefine((value, context) => {
+  if (value.type !== 'InternalTransfer') return;
+  if (!value.internalDirection) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['internalDirection'],
+      message: 'Transfer direction is required.',
+    });
+  }
+  if (!value.destinationAccountId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['destinationAccountId'],
+      message: 'Counterpart account is required.',
+    });
+  } else if (value.destinationAccountId === value.accountId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['destinationAccountId'],
+      message: 'Counterpart account must be different from the current account.',
+    });
+  }
 });
 
 export type TransactionFormValues = z.infer<typeof transactionSchema>;

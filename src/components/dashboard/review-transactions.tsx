@@ -27,6 +27,11 @@ import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { apiConfirmTransaction, apiSaveTransaction, apiSaveRule } from '@/lib/api';
 import { applyRuleClassificationToTransaction, ruleMatchesTransactionForBackfill } from '@/lib/utils/rule-utils';
 import { RuleBackfillPanel } from '@/components/transactions/rule-backfill-panel';
+import {
+  getInternalTransferDisplay,
+  getInternalTransferPairingStatus,
+  validateInternalTransfer,
+} from '@/lib/internal-transfer';
 
 interface ReviewTransactionsProps {
   transactions: Transaction[];
@@ -57,6 +62,9 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
       (subcategory) => subcategory.id === transaction.subcategoryId
     );
   };
+  const requiresTransferDetails = (transaction: Transaction) =>
+    transaction.type === 'InternalTransfer' &&
+    !validateInternalTransfer(transaction, accounts, workspaceId).valid;
   
   const handleApprove = async (transactionId: string) => {
     if (!workspaceId) return;
@@ -83,7 +91,6 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
     if (!workspaceId) return;
     try {
         const saved = await apiSaveTransaction(workspaceId, updatedTransaction);
-        setEditingTransaction(null);
         await reloadTransactions();
         toast({
           title: "Transaction Updated",
@@ -129,6 +136,7 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
             }
           }
         }
+        return saved;
     } catch (error) {
         console.error(error);
         toast({
@@ -259,6 +267,8 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
                             </span>
                           )}
                         </>
+                      ) : requiresTransferDetails(transaction) ? (
+                        <Badge variant="outline" className="w-fit text-xs">Transfer details required</Badge>
                       ) : isUnclassified(transaction) ? (
                         <Badge variant="outline" className="w-fit text-xs">Unclassified</Badge>
                       ) : (
@@ -268,14 +278,23 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col">
-                        <Badge variant="outline" className="mb-1 w-fit">{getCategoryName(transaction.categoryId)}</Badge>
-                        {transaction.subcategoryId && <span className="text-xs text-muted-foreground">{getSubcategoryName(transaction.subcategoryId)}</span>}
+                        <Badge variant="outline" className="mb-1 w-fit">
+                          {getInternalTransferDisplay(transaction, accounts) ?? getCategoryName(transaction.categoryId)}
+                        </Badge>
+                        {getInternalTransferPairingStatus(transaction) && (
+                          <span className="text-xs text-muted-foreground">
+                            {getInternalTransferPairingStatus(transaction)}
+                          </span>
+                        )}
+                        {transaction.type !== 'InternalTransfer' && transaction.subcategoryId && (
+                          <span className="text-xs text-muted-foreground">{getSubcategoryName(transaction.subcategoryId)}</span>
+                        )}
                     </div>
                   </TableCell>
                   <TableCell className={`text-right font-semibold ${transaction.amountBase > 0 ? 'text-green-600' : ''}`}>€{transaction.amountBase.toFixed(2)}</TableCell>
                   <TableCell className="text-right">
                     <div className="hidden md:flex items-center justify-end">
-                      {!transaction.isPotentialDuplicate && (
+                      {!transaction.isPotentialDuplicate && !requiresTransferDetails(transaction) && (
                         <Button variant="ghost" size="icon" onClick={() => handleApprove(transaction.id)}>
                             <Check className="h-4 w-4 text-green-500" />
                             <span className="sr-only">Approve</span>
@@ -294,7 +313,7 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
                                 </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                                {!transaction.isPotentialDuplicate && (
+                                {!transaction.isPotentialDuplicate && !requiresTransferDetails(transaction) && (
                                   <DropdownMenuItem onClick={() => handleApprove(transaction.id)}>
                                       <Check className="mr-2 h-4 w-4 text-green-500" />
                                       Approve
@@ -319,6 +338,7 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
         onOpenChange={(open) => { if (!open) setEditingTransaction(null) }}
         transaction={editingTransaction}
         onSave={handleSave}
+        onResolutionComplete={reloadTransactions}
         categories={categories}
         accounts={accounts}
       />

@@ -15,22 +15,16 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { accountSchema, type AccountFormValues } from '@/lib/schemas';
+import { calculateAccountBalance } from '@/lib/transaction-reporting';
 
 export default function AccountsPage() {
   const { accounts, transactions, workspaceId, reloadAccounts } = useFlowLedger();
 
   // Compute real balance per account: openingBalance + sum of confirmed transactions
   const balanceByAccountId = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const account of accounts) {
-      map[account.id] = account.openingBalance ?? 0;
-    }
-    for (const tx of transactions) {
-      if (!tx.needsReview && tx.accountId && map[tx.accountId] !== undefined) {
-        map[tx.accountId] += tx.amountBase;
-      }
-    }
-    return map;
+    return Object.fromEntries(
+      accounts.map((account) => [account.id, calculateAccountBalance(account, transactions)])
+    );
   }, [accounts, transactions]);
 
   const { toast } = useToast();

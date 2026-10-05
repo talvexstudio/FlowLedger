@@ -12,6 +12,7 @@ import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { useMemo } from 'react';
 import { isWithinInterval } from 'date-fns';
 import { toDate } from '@/app/(app)/dashboard/utils';
+import { isConfirmedExpense } from '@/lib/transaction-reporting';
 
 const CATEGORY_COLORS = [
   '#4F46E5',
@@ -32,7 +33,7 @@ export function ExpensesChart({ dateRange }: ExpensesChartProps) {
 
   const { data, total } = useMemo(() => {
     const expenseData = transactions
-      .filter(t => t.type === 'Expense' && t.categoryId && !t.needsReview)
+      .filter(t => isConfirmedExpense(t) && t.categoryId)
       .filter(t => {
         if (!dateRange) return true;
         const date = toDate(t.date);

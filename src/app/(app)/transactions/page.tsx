@@ -126,15 +126,14 @@ export default function TransactionsPage() {
                 }
               }
             }
+            return saved;
         } catch (error) {
             console.error(error);
             toast({
                 variant: 'destructive',
                 title: 'Save failed',
-                description: 'Could not save transaction changes.',
+                description: error instanceof Error ? error.message : 'Could not save transaction changes.',
             });
-        } finally {
-            setSheetState({ open: false, transaction: null });
         }
     };
 
@@ -266,8 +265,9 @@ export default function TransactionsPage() {
         onOpenChange={(open) => { if (!open) setSheetState({ open: false, transaction: null }) }}
         transaction={sheetState.transaction}
         onSave={handleSave}
+        onResolutionComplete={reloadTransactions}
         categories={categories}
-        accounts={accounts.filter(a => !a.archived)}
+        accounts={accounts}
       />
       <AlertDialog open={deleteState.open} onOpenChange={(open) => { if (!open) setDeleteState({ open: false, transaction: null })}}>
         <AlertDialogContent>

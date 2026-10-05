@@ -10,6 +10,8 @@ import {
   getTransactions,
   saveTransaction,
 } from "./transactions";
+import { getAccounts } from './accounts';
+import { normalizeTransactionTypeFields, validateInternalTransfer } from '../internal-transfer';
 
 const importsCollection = (workspaceId: string) => `workspaces/${workspaceId}/imports`;
 const templatesCollection = (workspaceId: string) => `workspaces/${workspaceId}/importTemplates`;
@@ -72,6 +74,7 @@ export type ImportCommitDependencies = {
   getExistingTransactions: typeof getTransactions;
   saveTransaction: typeof saveTransaction;
   deleteTransactionsByImport: typeof deleteTransactionsByImport;
+  getAccounts: typeof getAccounts;
 };
 
 const defaultCommitDependencies: ImportCommitDependencies = {
@@ -80,6 +83,7 @@ const defaultCommitDependencies: ImportCommitDependencies = {
   getExistingTransactions: getTransactions,
   saveTransaction,
   deleteTransactionsByImport,
+  getAccounts,
 };
 
 export class ImportCommitError extends Error {
@@ -107,16 +111,23 @@ export const commitImport = async (
       transactionCount: transactionCandidates.length,
     });
     const existingTransactions = await dependencies.getExistingTransactions(workspaceId);
+    const accounts = await dependencies.getAccounts(workspaceId);
     const comparisonTransactions = [...existingTransactions];
     const transactions: Transaction[] = [];
 
     for (const candidate of transactionCandidates) {
       const { id: _candidateId, ...candidateData } = candidate;
-      const transaction: Partial<Transaction> = {
+      const transaction: Partial<Transaction> = normalizeTransactionTypeFields({
         ...candidateData,
         workspaceId,
         importId: session.id,
-      };
+      });
+      if (
+        transaction.type === 'InternalTransfer' &&
+        !validateInternalTransfer(transaction, accounts, workspaceId).valid
+      ) {
+        transaction.needsReview = true;
+      }
       const duplicates = findDuplicateTransactions(transaction, comparisonTransactions);
       const transfers = findPotentialTransfers(transaction, comparisonTransactions);
 

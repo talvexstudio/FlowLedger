@@ -144,6 +144,7 @@ const makeMemoryDependencies = (
       sessions.delete(importId);
     },
     getExistingTransactions: async () => [...existing],
+    getAccounts: async () => [],
     saveTransaction: async (targetWorkspaceId, data) => {
       saveCount += 1;
       if (saveCount === failOnSaveNumber) throw new Error('Injected transaction write failure');

@@ -1,12 +1,14 @@
 // Pure rule-matching utilities — no database access, safe to import in client components.
 
 import type { Category, ClassificationRule, Subcategory, Transaction } from '@/lib/types';
+import { normalizeTransactionTypeFields } from '@/lib/internal-transfer';
 
 export const applyRulesToTransaction = (
   tx: Partial<Transaction>,
   rules: ClassificationRule[]
 ): Partial<Transaction> => {
   let result = { ...tx };
+  let ruleAssignedInternalTransfer = false;
   const desc = (tx.rawDescription || tx.description || '').toLowerCase();
   const amount = Math.abs(tx.amountBase ?? 0);
 
@@ -16,6 +18,7 @@ export const applyRulesToTransaction = (
     if (m.accountId && tx.accountId && tx.accountId !== m.accountId) continue;
     if (typeof m.minAmount === 'number' && amount < m.minAmount) continue;
     if (typeof m.maxAmount === 'number' && amount > m.maxAmount) continue;
+    if (rule.action.type === 'InternalTransfer') ruleAssignedInternalTransfer = true;
     result = {
       ...result,
       categoryId: rule.action.categoryId ?? result.categoryId,
@@ -23,7 +26,10 @@ export const applyRulesToTransaction = (
       type: rule.action.type ?? result.type,
     };
   }
-  return result;
+  const normalized = normalizeTransactionTypeFields(result);
+  return ruleAssignedInternalTransfer
+    ? { ...normalized, needsReview: true }
+    : normalized;
 };
 
 const STOPWORDS = new Set([
@@ -79,6 +85,18 @@ export const applyRuleClassificationToTransaction = (
   }
 
   if (!updated.type && rule.action.type) updated.type = rule.action.type;
+  const normalized = normalizeTransactionTypeFields({ ...tx, ...updated });
+  if (normalized.type === 'InternalTransfer') {
+    return {
+      id: tx.id,
+      type: 'InternalTransfer',
+      categoryId: undefined,
+      subcategoryId: undefined,
+      isInternalTransfer: true,
+      needsReview: true,
+    };
+  }
+
   updated.needsReview = false;
   return updated;
 };

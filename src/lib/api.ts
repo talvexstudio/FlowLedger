@@ -11,6 +11,8 @@ import type {
   ImportTemplate,
   Subcategory,
   Transaction,
+  TransferCounterpartCandidate,
+  TransferResolutionResult,
   Workspace,
 } from '@/lib/types';
 import type {
@@ -67,6 +69,36 @@ export const apiDeleteTransactions = (workspaceId: string, ids: string[]) =>
 
 export const apiDeleteTransactionsByImport = (workspaceId: string, importId: string) =>
   call<{ ok: true }>('/api/transactions', { method: 'DELETE', body: JSON.stringify({ workspaceId, importId }) });
+
+export const apiGetTransferCounterpartCandidates = (
+  workspaceId: string,
+  transactionId: string
+) => call<TransferCounterpartCandidate[]>(
+  `/api/transactions?action=transferCandidates&workspaceId=${encodeURIComponent(workspaceId)}&transactionId=${encodeURIComponent(transactionId)}`
+);
+
+export const apiLinkExistingTransferPair = (
+  workspaceId: string,
+  transactionId: string,
+  candidateId: string
+) => call<TransferResolutionResult>('/api/transactions', {
+  method: 'PATCH',
+  body: JSON.stringify({ action: 'linkExistingTransfer', workspaceId, transactionId, candidateId }),
+});
+
+export const apiCreateCounterpartForExisting = (
+  workspaceId: string,
+  transactionId: string,
+  allowCandidateOverride = false
+) => call<TransferResolutionResult>('/api/transactions', {
+  method: 'PATCH',
+  body: JSON.stringify({
+    action: 'createTransferCounterpart',
+    workspaceId,
+    transactionId,
+    allowCandidateOverride,
+  }),
+});
 
 // ─── Categories ────────────────────────────────────────────────────────────
 export const apiGetCategories = () =>

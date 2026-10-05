@@ -68,6 +68,16 @@ export type Transaction = {
   updatedAt: Date;
 };
 
+export type TransferCounterpartCandidate = {
+  transaction: Transaction;
+  calendarDayDifference: number;
+};
+
+export type TransferResolutionResult = {
+  source: Transaction;
+  counterpart: Transaction;
+};
+
 export type ImportSession = {
   id: string;
   workspaceId: string;
