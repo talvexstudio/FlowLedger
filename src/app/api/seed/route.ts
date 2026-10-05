@@ -42,8 +42,8 @@ export async function POST(req: NextRequest) {
     const transactionsPath = `workspaces/${workspaceId}/transactions`;
 
     if (clear) {
-      db.clearCollection(accountsPath);
-      db.clearCollection(transactionsPath);
+      await db.clearCollection(accountsPath);
+      await db.clearCollection(transactionsPath);
     }
 
     for (const account of DEMO_ACCOUNTS) {
