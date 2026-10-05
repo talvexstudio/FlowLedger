@@ -65,21 +65,21 @@ export const readCanonicalStoreRecords = (
   );
 };
 
-const writeJsonArrayFile = (filePath: string, data: JsonDocument[]) => {
+export const writeFileAtomically = (filePath: string, data: string | Buffer) => {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const temporaryPath = buildTemporaryFilePath(filePath);
 
   try {
-    fs.writeFileSync(temporaryPath, JSON.stringify(data, null, 2), {
-      encoding: 'utf-8',
-      flag: 'wx',
-    });
+    fs.writeFileSync(temporaryPath, data, { flag: 'wx' });
     fs.renameSync(temporaryPath, filePath);
   } catch (error) {
     if (fs.existsSync(temporaryPath)) fs.rmSync(temporaryPath, { force: true });
     throw error;
   }
 };
+
+const writeJsonArrayFile = (filePath: string, data: JsonDocument[]) =>
+  writeFileAtomically(filePath, JSON.stringify(data, null, 2));
 
 const resolveStore = (collPath: string) => {
   const parts = collPath.split('/');

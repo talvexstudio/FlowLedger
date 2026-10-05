@@ -13,6 +13,7 @@ import {
   MINIMUM_COMPATIBLE_FLOWLEDGER_VERSION,
 } from './version';
 import { readCanonicalStoreRecords } from '../services/json-store';
+import { recoverPendingRestoresUnlocked } from './restore-recovery';
 
 type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
@@ -44,6 +45,7 @@ export type FlowLedgerBackup = {
 
 export type CreateBackupOptions = {
   dataDirectory?: string;
+  operationsDirectory?: string;
   now?: () => Date;
 };
 
@@ -104,6 +106,13 @@ export const createBackup = async (
   if (!isBackupScope(scope)) throw new BackupExportError('Unsupported backup scope.');
 
   return withDataLock(() => {
+    try {
+      recoverPendingRestoresUnlocked(options);
+    } catch (error) {
+      throw new BackupExportError('Cannot export while unfinished restore recovery requires attention.', {
+        cause: error,
+      });
+    }
     const includedStores = [...BACKUP_SCOPE_STORES[scope]];
     const data: Partial<Record<PersistedStoreKey, BackupRecord[]>> = {};
     const storeManifest: BackupStoreManifestEntry[] = [];
