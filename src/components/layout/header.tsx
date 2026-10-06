@@ -20,13 +20,13 @@ import {
 } from '@/components/ui/avatar';
 import { ChevronsUpDown, LogOut, User } from 'lucide-react';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
+import { getWorkspaceSelectorLabel } from '@/lib/workspace-selection';
 import Link from 'next/link';
 
 
 export function AppHeader() {
-  const { workspaces, workspaceId, setWorkspaceId } = useFlowLedger();
-  
-  const currentWorkspace = workspaces.find(w => w.id === workspaceId);
+  const { workspaces, workspaceId, setWorkspaceId, isLoading } = useFlowLedger();
+  const workspaceLabel = getWorkspaceSelectorLabel(workspaces, workspaceId, isLoading);
 
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-background/80 backdrop-blur-sm px-4 md:px-6">
@@ -40,13 +40,13 @@ export function AppHeader() {
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="w-48 justify-between">
-                    {currentWorkspace?.name || 'Select Workspace'}
+                    {workspaceLabel}
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-56">
                 <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
-                <DropdownMenuRadioGroup value={workspaceId || ''} onValueChange={setWorkspaceId}>
+                <DropdownMenuRadioGroup value={workspaceId ?? ''} onValueChange={setWorkspaceId}>
                     {workspaces.map(ws => (
                         <DropdownMenuRadioItem key={ws.id} value={ws.id}>{ws.name}</DropdownMenuRadioItem>
                     ))}

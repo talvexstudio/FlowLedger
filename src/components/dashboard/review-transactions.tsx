@@ -64,7 +64,7 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
   };
   const requiresTransferDetails = (transaction: Transaction) =>
     transaction.type === 'InternalTransfer' &&
-    !validateInternalTransfer(transaction, accounts, workspaceId).valid;
+    (!workspaceId || !validateInternalTransfer(transaction, accounts, workspaceId).valid);
   
   const handleApprove = async (transactionId: string) => {
     if (!workspaceId) return;

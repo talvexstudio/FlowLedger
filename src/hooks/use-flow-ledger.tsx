@@ -10,12 +10,15 @@ import {
   apiGetBudget,
 } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
-
-const DEFAULT_WORKSPACE_ID = 'ws1';
+import {
+  initializeWorkspaceSelection,
+  persistWorkspaceId,
+  type WorkspaceSelectionStorage,
+} from '@/lib/workspace-selection';
 
 interface FlowLedgerContextType {
   workspaces: Workspace[];
-  workspaceId: string;
+  workspaceId: string | null;
   setWorkspaceId: (id: string) => void;
   accounts: Account[];
   transactions: Transaction[];
@@ -34,7 +37,8 @@ const FlowLedgerContext = createContext<FlowLedgerContextType | undefined>(undef
 
 export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [workspaceId, setWorkspaceId] = useState<string>(DEFAULT_WORKSPACE_ID);
+  const [workspaceId, setWorkspaceIdState] = useState<string | null>(null);
+  const [workspacesInitialized, setWorkspacesInitialized] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<(Category & { subcategories: Subcategory[] })[]>([]);
@@ -45,20 +49,39 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
   const toastRef = useRef(toast);
   toastRef.current = toast;
 
+  const getBrowserStorage = (): WorkspaceSelectionStorage | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+      return window.localStorage;
+    } catch {
+      return null;
+    }
+  };
+
   const fetchWorkspaces = useCallback(async () => {
     try {
       const data = await apiGetWorkspaces();
       setWorkspaces(data);
-      if (data.length > 0 && !data.find((w) => w.id === workspaceId)) {
-        setWorkspaceId(data[0].id);
-      }
+      setWorkspaceIdState(initializeWorkspaceSelection(data, getBrowserStorage()));
     } catch (e) {
+      setWorkspaces([]);
+      setWorkspaceIdState(null);
       console.error('Failed to load workspaces:', e);
       toastRef.current({ title: 'Failed to load workspaces', description: (e as Error).message, variant: 'destructive' });
     }
-  }, [workspaceId]);
+  }, []);
+
+  const setWorkspaceId = useCallback((id: string) => {
+    if (!workspaces.some((workspace) => workspace.id === id)) return;
+    persistWorkspaceId(getBrowserStorage(), id);
+    setWorkspaceIdState(id);
+  }, [workspaces]);
 
   const fetchAccounts = useCallback(async () => {
+    if (!workspaceId) {
+      setAccounts([]);
+      return;
+    }
     try {
       const data = await apiGetAccounts(workspaceId);
       setAccounts(data);
@@ -69,6 +92,10 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
   }, [workspaceId]);
 
   const fetchTransactions = useCallback(async () => {
+    if (!workspaceId) {
+      setTransactions([]);
+      return;
+    }
     try {
       const data = await apiGetTransactions(workspaceId);
       setTransactions(
@@ -93,6 +120,10 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
   const fetchBudget = useCallback(async (year?: number) => {
     const targetYear = year ?? budgetYear;
     if (year && year !== budgetYear) setBudgetYear(year);
+    if (!workspaceId) {
+      setBudgetLines([]);
+      return;
+    }
     try {
       const { lines } = await apiGetBudget(workspaceId, targetYear);
       setBudgetLines(lines);
@@ -101,20 +132,27 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [workspaceId, budgetYear]);
 
-  // Only run on mount and when workspaceId changes
   useEffect(() => {
     setIsLoading(true);
-    fetchWorkspaces().then(() => fetchCategories()).finally(() => {
-      // accounts/transactions load in the next effect; keep loading until those finish
+    Promise.all([fetchWorkspaces(), fetchCategories()]).finally(() => {
+      setWorkspacesInitialized(true);
     });
-  }, []); // Only on mount
+  }, [fetchCategories, fetchWorkspaces]);
 
   useEffect(() => {
+    if (!workspacesInitialized) return;
+    if (!workspaceId) {
+      setAccounts([]);
+      setTransactions([]);
+      setBudgetLines([]);
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     Promise.all([fetchAccounts(), fetchTransactions(), fetchBudget()]).finally(() => {
       setIsLoading(false);
     });
-  }, [workspaceId]); // Only when workspace changes
+  }, [fetchAccounts, fetchBudget, fetchTransactions, workspaceId, workspacesInitialized]);
 
   const contextValue = useMemo(() => ({
     workspaces,
