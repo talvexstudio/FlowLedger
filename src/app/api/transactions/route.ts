@@ -5,7 +5,6 @@ import {
   createInternalTransferPair,
   confirmTransaction,
   deleteTransaction,
-  deleteTransactions,
   deleteTransactionsByImport,
   getTransaction,
   findTransferCounterpartCandidates,
@@ -162,7 +161,7 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { action, workspaceId, transactionId, ids, importId } = body;
+    const { action, workspaceId, transactionId, importId } = body;
 
     if (!workspaceId) return NextResponse.json({ error: 'workspaceId required' }, { status: 400 });
 
@@ -232,18 +231,16 @@ export async function PATCH(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const body = await req.json();
-    const { workspaceId, id, ids, importId } = body;
+    const { workspaceId, id, importId } = body;
 
     if (!workspaceId) return NextResponse.json({ error: 'workspaceId required' }, { status: 400 });
 
     if (importId) {
       await deleteTransactionsByImport(workspaceId, importId);
-    } else if (ids && Array.isArray(ids)) {
-      await deleteTransactions(workspaceId, ids);
     } else if (id) {
       await deleteTransaction(workspaceId, id);
     } else {
-      return NextResponse.json({ error: 'Provide id, ids, or importId' }, { status: 400 });
+      return NextResponse.json({ error: 'Provide id or importId' }, { status: 400 });
     }
 
     return NextResponse.json({ ok: true });

@@ -17,7 +17,8 @@ export type DataManagementOperationKind =
   | 'clear-activity'
   | 'reset-financial'
   | 'factory-reset'
-  | 'import-history-delete';
+  | 'import-history-delete'
+  | 'transaction-bulk-delete';
 
 export type RestoreJournalState = 'prepared' | 'replacing' | 'rollback_failed' | 'rolled_back' | 'completed';
 

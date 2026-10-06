@@ -195,22 +195,6 @@ export const deleteTransaction = async (workspaceId: string, transactionId: stri
     await db.collection(transactionsCollection(workspaceId)).doc(transactionId).delete();
 }
 
-export const deleteTransactions = async (workspaceId: string, ids: string[]): Promise<void> => {
-    const transactions = await getTransactions(workspaceId);
-    const linked = transactions.find(
-        (transaction) => ids.includes(transaction.id) && transaction.linkedTransactionId
-    );
-    if (linked) {
-        throw new TransferResolutionError(
-            'Linked transfer records cannot be bulk deleted. Pair deletion is not supported yet.'
-        );
-    }
-    const coll = db.collection(transactionsCollection(workspaceId));
-    for (const id of ids) {
-        await coll.doc(id).delete();
-    }
-}
-
 export const createInternalTransferPair = async (
     workspaceId: string,
     sourceData: Partial<Transaction>,

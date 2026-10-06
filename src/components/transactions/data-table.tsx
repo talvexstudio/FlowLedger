@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ListFilter, Calendar as CalendarIcon, Check, Edit, MoreVertical, ChevronLeft, ChevronRight, X, Trash2 } from 'lucide-react';
+import { ListFilter, Calendar as CalendarIcon, Check, Edit, MoreVertical, ChevronLeft, ChevronRight, X, Trash2, Download, Loader2 } from 'lucide-react';
 import type { Transaction } from '@/lib/types';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuCheckboxItem } from '../ui/dropdown-menu';
@@ -32,7 +32,6 @@ import { endOfDay, format } from 'date-fns';
 import { Input } from '../ui/input';
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -40,6 +39,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import type { TransactionBulkDeletePreview } from '@/lib/data-management/transaction-bulk-delete-types';
+import { formatCount } from '@/lib/data-management/ui-copy';
 import {
   getInternalTransferDisplay,
   getInternalTransferPairingStatus,
@@ -52,10 +53,28 @@ interface TransactionsDataTableProps {
   onEdit: (transaction: Transaction) => void;
   onConfirm: (transaction: Transaction) => void;
   onDelete: (transaction: Transaction) => void;
-  onBulkDelete: (ids: string[]) => void;
+  onBulkDeletePreview: (ids: string[]) => Promise<TransactionBulkDeletePreview | null>;
+  onBulkDelete: (ids: string[]) => Promise<boolean>;
+  onExportActivityBackup: () => Promise<void>;
 }
 
-export function TransactionsDataTable({ onEdit, onConfirm, onDelete, onBulkDelete }: TransactionsDataTableProps) {
+export const nextSelectionAfterBulkDelete = (selectedIds: string[], succeeded: boolean) =>
+  succeeded ? [] : selectedIds;
+
+export const clampTransactionPage = (currentPage: number, totalPages: number) =>
+  Math.min(Math.max(currentPage, 1), Math.max(totalPages, 1));
+
+export const incompleteLinkedPairMessage = (count: number) =>
+  `${count} linked transfer pair${count === 1 ? ' is' : 's are'} incomplete. Select both transfer transactions before deleting.`;
+
+export function TransactionsDataTable({
+  onEdit,
+  onConfirm,
+  onDelete,
+  onBulkDeletePreview,
+  onBulkDelete,
+  onExportActivityBackup,
+}: TransactionsDataTableProps) {
   const { accounts, categories, transactions } = useFlowLedger();
   const [accountFilter, setAccountFilter] = React.useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = React.useState<string[]>([]);
@@ -64,6 +83,10 @@ export function TransactionsDataTable({ onEdit, onConfirm, onDelete, onBulkDelet
   const [openMenuId, setOpenMenuId] = React.useState<string | null>(null);
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false);
+  const [bulkDeletePreview, setBulkDeletePreview] = React.useState<TransactionBulkDeletePreview | null>(null);
+  const [bulkPreviewing, setBulkPreviewing] = React.useState(false);
+  const [bulkDeleting, setBulkDeleting] = React.useState(false);
+  const [bulkConfirmed, setBulkConfirmed] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState('');
 
   const getCategoryName = (catId?: string) => categories.find(c => c.id === catId)?.name || 'Uncategorized';
@@ -112,6 +135,39 @@ export function TransactionsDataTable({ onEdit, onConfirm, onDelete, onBulkDelet
     const existingIds = new Set(transactions.map(t => t.id));
     setSelectedIds(prev => prev.filter(id => existingIds.has(id)));
   }, [transactions]);
+
+  React.useEffect(() => {
+    setCurrentPage((page) => clampTransactionPage(page, totalPages));
+  }, [totalPages]);
+
+  const reviewBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    setBulkDeleteOpen(true);
+    setBulkDeletePreview(null);
+    setBulkConfirmed(false);
+    setBulkPreviewing(true);
+    try {
+      setBulkDeletePreview(await onBulkDeletePreview(selectedIds));
+    } finally {
+      setBulkPreviewing(false);
+    }
+  };
+
+  const executeBulkDelete = async () => {
+    if (!bulkDeletePreview?.allowed || !bulkConfirmed) return;
+    setBulkDeleting(true);
+    try {
+      const succeeded = await onBulkDelete(selectedIds);
+      setSelectedIds((current) => nextSelectionAfterBulkDelete(current, succeeded));
+      if (succeeded) {
+        setBulkDeleteOpen(false);
+        setBulkDeletePreview(null);
+        setBulkConfirmed(false);
+      }
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
 
   const toggleAccountFilter = (accountId: string) => {
     setAccountFilter(prev =>
@@ -245,7 +301,8 @@ export function TransactionsDataTable({ onEdit, onConfirm, onDelete, onBulkDelet
         {selectedIds.length > 0 && (
           <div className="mb-2 flex items-center justify-between text-sm text-muted-foreground">
             <span>{selectedIds.length} transaction(s) selected</span>
-            <Button variant="destructive" size="sm" onClick={() => setBulkDeleteOpen(true)}>
+            <Button variant="destructive" size="sm" onClick={reviewBulkDelete} disabled={bulkPreviewing || bulkDeleting}>
+              {bulkPreviewing && <Loader2 className="animate-spin" />}
               Delete selected
             </Button>
           </div>
@@ -405,26 +462,77 @@ export function TransactionsDataTable({ onEdit, onConfirm, onDelete, onBulkDelet
                 </Button>
             </div>
         </div>
-        <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialog
+          open={bulkDeleteOpen}
+          onOpenChange={(open) => {
+            if (bulkDeleting) return;
+            setBulkDeleteOpen(open);
+            if (!open) {
+              setBulkDeletePreview(null);
+              setBulkConfirmed(false);
+            }
+          }}
+        >
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Delete selected transactions?</AlertDialogTitle>
               <AlertDialogDescription>
-                This action cannot be undone. This will permanently delete the selected transactions.
+                Review the exact impact before permanently deleting the selected transactions.
               </AlertDialogDescription>
             </AlertDialogHeader>
+            {bulkPreviewing && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Reviewing deletion impact...
+              </div>
+            )}
+            {bulkDeletePreview && (
+              <div className="space-y-4 text-sm">
+                <div className="space-y-1">
+                  <p><strong>{formatCount(bulkDeletePreview.transactionsToDelete, 'transaction')}</strong> will be deleted.</p>
+                  <p>{formatCount(bulkDeletePreview.remainingTransactionCount, 'transaction')} will remain.</p>
+                  <p>{formatCount(bulkDeletePreview.completeLinkedPairCount, 'complete linked transfer pair')} selected.</p>
+                  {bulkDeletePreview.affectedImportSessionCount > 0 && (
+                    <p>{formatCount(bulkDeletePreview.affectedImportSessionCount, 'import session')} affected; none will be deleted.</p>
+                  )}
+                  {bulkDeletePreview.zeroLinkedImportSessionCount > 0 && (
+                    <p>{formatCount(bulkDeletePreview.zeroLinkedImportSessionCount, 'import session')} will have no linked transactions afterward.</p>
+                  )}
+                </div>
+
+                {!bulkDeletePreview.allowed && (
+                  <p className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-destructive">
+                    {incompleteLinkedPairMessage(bulkDeletePreview.incompleteLinkedPairCount)}
+                  </p>
+                )}
+
+                <Button type="button" variant="outline" onClick={onExportActivityBackup} disabled={bulkDeleting}>
+                  <Download /> Export Activity backup first
+                </Button>
+
+                <div className="flex items-start gap-3">
+                  <Checkbox
+                    id="confirm-bulk-transaction-delete"
+                    checked={bulkConfirmed}
+                    onCheckedChange={(value) => setBulkConfirmed(value === true)}
+                    disabled={bulkDeleting || !bulkDeletePreview.allowed}
+                  />
+                  <label htmlFor="confirm-bulk-transaction-delete" className="leading-5">
+                    I understand that the selected transactions will be permanently deleted.
+                  </label>
+                </div>
+              </div>
+            )}
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() => {
-                  onBulkDelete(selectedIds);
-                  setSelectedIds([]);
-                  setBulkDeleteOpen(false);
-                }}
-                className="bg-destructive hover:bg-destructive/90"
+              <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={executeBulkDelete}
+                disabled={!bulkDeletePreview?.allowed || !bulkConfirmed || bulkDeleting}
               >
-                Delete
-              </AlertDialogAction>
+                {bulkDeleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                {bulkDeleting ? 'Deleting...' : 'Delete selected transactions'}
+              </Button>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>

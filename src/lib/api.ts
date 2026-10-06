@@ -20,6 +20,10 @@ import type {
   PdfExtractionReport,
   PdfTemplateSummary,
 } from '@/lib/pdf-import/types';
+import type {
+  TransactionBulkDeletePreview,
+  TransactionBulkDeleteResult,
+} from '@/lib/data-management/transaction-bulk-delete-types';
 
 async function call<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -64,8 +68,17 @@ export const apiConfirmTransaction = (workspaceId: string, transactionId: string
 export const apiDeleteTransaction = (workspaceId: string, id: string) =>
   call<{ ok: true }>('/api/transactions', { method: 'DELETE', body: JSON.stringify({ workspaceId, id }) });
 
-export const apiDeleteTransactions = (workspaceId: string, ids: string[]) =>
-  call<{ ok: true }>('/api/transactions', { method: 'DELETE', body: JSON.stringify({ workspaceId, ids }) });
+export const apiPreviewTransactionBulkDelete = (workspaceId: string, transactionIds: string[]) =>
+  call<{ ok: true; preview: TransactionBulkDeletePreview }>(
+    '/api/data-management/transactions/delete/preview',
+    { method: 'POST', body: JSON.stringify({ workspaceId, transactionIds }) }
+  ).then((response) => response.preview);
+
+export const apiBulkDeleteTransactions = (workspaceId: string, transactionIds: string[]) =>
+  call<{ ok: true; result: TransactionBulkDeleteResult }>(
+    '/api/data-management/transactions/delete',
+    { method: 'POST', body: JSON.stringify({ workspaceId, transactionIds, confirmDelete: true }) }
+  ).then((response) => response.result);
 
 export const apiDeleteTransactionsByImport = (workspaceId: string, importId: string) =>
   call<{ ok: true }>('/api/transactions', { method: 'DELETE', body: JSON.stringify({ workspaceId, importId }) });
