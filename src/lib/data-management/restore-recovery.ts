@@ -12,10 +12,17 @@ import { getDataDirectory, writeFileAtomically } from '../services/json-store';
 export const RESTORE_JOURNAL_VERSION = 1;
 export const RESTORE_JOURNAL_FILENAME = 'restore-journal.json';
 
+export type DataManagementOperationKind =
+  | 'restore'
+  | 'clear-activity'
+  | 'reset-financial'
+  | 'factory-reset';
+
 export type RestoreJournalState = 'prepared' | 'replacing' | 'rollback_failed' | 'rolled_back' | 'completed';
 
 export type RestoreJournal = {
   journalVersion: 1;
+  operationKind?: DataManagementOperationKind;
   operationId: string;
   createdAt: string;
   state: RestoreJournalState;
@@ -52,13 +59,13 @@ const readJournal = (journalPath: string): RestoreJournal => {
   } catch (error) {
     throw new RestoreError(
       'ROLLBACK_FAILURE',
-      'An unfinished restore journal could not be read. Manual recovery is required.',
+      'An unfinished data-management journal could not be read. Manual recovery is required.',
       { cause: error }
     );
   }
 
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new RestoreError('ROLLBACK_FAILURE', 'An unfinished restore journal is invalid. Manual recovery is required.');
+    throw new RestoreError('ROLLBACK_FAILURE', 'An unfinished data-management journal is invalid. Manual recovery is required.');
   }
   const journal = value as Partial<RestoreJournal>;
   if (
@@ -72,7 +79,7 @@ const readJournal = (journalPath: string): RestoreJournal => {
     typeof journal.stagedFiles !== 'object' ||
     !Array.isArray(journal.replacedStores)
   ) {
-    throw new RestoreError('ROLLBACK_FAILURE', 'An unfinished restore journal is invalid. Manual recovery is required.');
+    throw new RestoreError('ROLLBACK_FAILURE', 'An unfinished data-management journal is invalid. Manual recovery is required.');
   }
   return journal as RestoreJournal;
 };
@@ -151,7 +158,7 @@ export const recoverPendingRestoresUnlocked = (options: {
       }
       throw new RestoreError(
         'ROLLBACK_FAILURE',
-        'Automatic recovery of an unfinished restore failed. The recovery artifacts were preserved.',
+        'Automatic recovery of an unfinished data-management operation failed. The recovery artifacts were preserved.',
         { cause: error }
       );
     }

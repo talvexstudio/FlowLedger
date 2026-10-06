@@ -26,6 +26,19 @@ export const buildTemporaryFilePath = (targetPath: string) =>
     `.${path.basename(targetPath)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`
   );
 
+export const replaceFileAtomically = (sourcePath: string, targetPath: string) => {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      fs.renameSync(sourcePath, targetPath);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (!['EACCES', 'EBUSY', 'EPERM'].includes(code ?? '') || attempt >= 5) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5 * (attempt + 1));
+    }
+  }
+};
+
 export const readJsonArrayFile = (
   filePath: string,
   options: { allowMissing?: boolean } = {}
@@ -71,7 +84,7 @@ export const writeFileAtomically = (filePath: string, data: string | Buffer) => 
 
   try {
     fs.writeFileSync(temporaryPath, data, { flag: 'wx' });
-    fs.renameSync(temporaryPath, filePath);
+    replaceFileAtomically(temporaryPath, filePath);
   } catch (error) {
     if (fs.existsSync(temporaryPath)) fs.rmSync(temporaryPath, { force: true });
     throw error;

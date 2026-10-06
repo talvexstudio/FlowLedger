@@ -6,6 +6,8 @@ export type RestoreErrorCode =
   | 'HASH_MISMATCH'
   | 'REFERENTIAL_INTEGRITY_FAILURE'
   | 'RESTORE_EXECUTION_FAILURE'
+  | 'INVALID_OPERATION'
+  | 'DATA_OPERATION_FAILURE'
   | 'ROLLBACK_FAILURE';
 
 export class RestoreError extends Error {

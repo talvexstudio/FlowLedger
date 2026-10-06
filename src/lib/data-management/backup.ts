@@ -160,6 +160,6 @@ export const createBackup = async (
 
 export const createBackupFilename = (createdAt: string, scope: BackupScope) => {
   const timestamp = createdAt.replace(/\.\d{3}Z$/, 'Z').replace(/:/g, '-');
-  const scopeName = scope === 'financial_activity' ? 'financial-activity' : 'everything';
+  const scopeName = scope.replace(/_/g, '-');
   return `flowledger-backup-${timestamp}-${scopeName}.json`;
 };

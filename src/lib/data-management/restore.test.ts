@@ -23,6 +23,7 @@ import { previewRestore, RESTORE_WRITE_ORDER, restoreBackup } from './restore';
 import { parseAndValidateRestoreBackup, validateRestoreBackup } from './restore-validation';
 import {
   BACKUP_SCOPE_STORES,
+  LEGACY_FINANCIAL_ACTIVITY_STORES,
   PERSISTED_STORE_KEYS,
   PERSISTED_STORES,
   type BackupScope,
@@ -140,6 +141,19 @@ const createFixtureBackup = async (
   return createBackup(scope, { dataDirectory: source, operationsDirectory: operations, now: () => new Date(now) });
 };
 
+const createLegacyFixtureBackup = async (stores = fixtureStores()) => {
+  const complete = await createFixtureBackup('everything', stores);
+  return {
+    ...complete,
+    scope: 'financial_activity' as const,
+    includedStores: [...LEGACY_FINANCIAL_ACTIVITY_STORES],
+    storeManifest: complete.storeManifest.filter((entry) =>
+      LEGACY_FINANCIAL_ACTIVITY_STORES.includes(entry.key as typeof LEGACY_FINANCIAL_ACTIVITY_STORES[number])
+    ),
+    data: Object.fromEntries(LEGACY_FINANCIAL_ACTIVITY_STORES.map((key) => [key, complete.data[key]])),
+  };
+};
+
 const cloneBackup = (backup: FlowLedgerBackup) => structuredClone(backup) as FlowLedgerBackup;
 
 const refreshStoreManifest = (backup: FlowLedgerBackup, key: PersistedStoreKey) => {
@@ -157,9 +171,9 @@ const expectCode = async (operation: () => unknown | Promise<unknown>, code: Res
   );
 };
 
-const backupJson = (backup: FlowLedgerBackup) => JSON.stringify(backup);
+const backupJson = (backup: unknown) => JSON.stringify(backup);
 
-test('valid everything and financial activity backups produce metadata-only previews', async () => {
+test('everything, scoped, and legacy backups produce accurate metadata-only previews', async () => {
   const everything = await createFixtureBackup('everything');
   const everythingPreview = await previewRestore(backupJson(everything), {
     dataDirectory: makeRoot(), operationsDirectory: makeRoot(),
@@ -170,16 +184,38 @@ test('valid everything and financial activity backups produce metadata-only prev
   assert.deepEqual(everythingPreview.storesToClear, []);
   assert.equal(JSON.stringify(everythingPreview).includes('SECRET RESTORE DESCRIPTION'), false);
 
-  const activity = await createFixtureBackup('financial_activity');
+  const currentRoot = makeRoot();
+  const currentData = path.join(currentRoot, 'data');
+  const currentOperations = path.join(currentRoot, 'operations');
+  writeStores(currentData, fixtureStores('Current'));
+
+  const activity = await createFixtureBackup('activity');
   const activityPreview = await previewRestore(backupJson(activity), {
+    dataDirectory: currentData, operationsDirectory: currentOperations,
+  });
+  assert.equal(activityPreview.scope, 'activity');
+  assert.equal(activityPreview.scopeLabel, 'Activity');
+  assert.deepEqual(activityPreview.includedStores, [...BACKUP_SCOPE_STORES.activity]);
+  assert.deepEqual(activityPreview.preservedStores, ['workspaces', 'accounts', 'categories', 'importTemplates', 'budgets', 'rules']);
+  assert.deepEqual(activityPreview.storesToClear, []);
+
+  const financial = await createFixtureBackup('financial_data');
+  const financialPreview = await previewRestore(backupJson(financial), {
+    dataDirectory: currentData, operationsDirectory: currentOperations,
+  });
+  assert.equal(financialPreview.scopeLabel, 'Financial Data');
+  assert.deepEqual(financialPreview.preservedStores, ['workspaces']);
+
+  const legacy = await createLegacyFixtureBackup();
+  const legacyPreview = await previewRestore(backupJson(legacy), {
     dataDirectory: makeRoot(), operationsDirectory: makeRoot(),
   });
-  assert.equal(activityPreview.scope, 'financial_activity');
-  assert.deepEqual(activityPreview.includedStores, [...BACKUP_SCOPE_STORES.financial_activity]);
-  assert.deepEqual(activityPreview.storesToClear, ['importTemplates', 'budgets', 'rules']);
-  assert.equal(activityPreview.counts.importTemplates, 0);
-  assert.equal(activityPreview.counts.budgets, 0);
-  assert.equal(activityPreview.counts.rules, 0);
+  assert.equal(legacyPreview.scope, 'financial_activity');
+  assert.equal(legacyPreview.scopeLabel, 'Legacy Financial activity');
+  assert.equal(legacyPreview.isLegacy, true);
+  assert.deepEqual(legacyPreview.includedStores, [...LEGACY_FINANCIAL_ACTIVITY_STORES]);
+  assert.deepEqual(legacyPreview.storesToClear, ['importTemplates', 'budgets', 'rules']);
+  assert.equal(JSON.stringify(legacyPreview).includes('SECRET RESTORE DESCRIPTION'), false);
 });
 
 test('malformed JSON, malformed metadata, and unknown scope are blocked', async () => {
@@ -298,8 +334,8 @@ test('everything restore replaces all eight stores', async () => {
   for (const key of PERSISTED_STORE_KEYS) assert.deepEqual(restored[key], backup.data[key]);
 });
 
-test('financial activity restore replaces its five stores and explicitly clears omitted stores', async () => {
-  const backup = await createFixtureBackup('financial_activity', fixtureStores('Restored'));
+test('legacy financial activity restore replaces its five stores and explicitly clears omitted stores', async () => {
+  const backup = await createLegacyFixtureBackup(fixtureStores('Restored'));
   const root = makeRoot();
   const dataDirectory = path.join(root, 'data');
   const operationsDirectory = path.join(root, 'operations');
@@ -308,10 +344,121 @@ test('financial activity restore replaces its five stores and explicitly clears 
   const result = await restoreBackup(backupJson(backup), { dataDirectory, operationsDirectory });
   assert.deepEqual(result.clearedStores, ['importTemplates', 'budgets', 'rules']);
   const restored = readStores(dataDirectory);
-  for (const key of BACKUP_SCOPE_STORES.financial_activity) assert.deepEqual(restored[key], backup.data[key]);
+  for (const key of LEGACY_FINANCIAL_ACTIVITY_STORES) assert.deepEqual(restored[key], backup.data[key]);
   assert.deepEqual(restored.importTemplates, []);
   assert.deepEqual(restored.budgets, []);
   assert.deepEqual(restored.rules, []);
+});
+
+test('Activity restore replaces only imports and transactions and preserves six stores byte-for-byte', async () => {
+  const backup = await createFixtureBackup('activity', fixtureStores('Restored'));
+  const root = makeRoot();
+  const dataDirectory = path.join(root, 'data');
+  const operationsDirectory = path.join(root, 'operations');
+  writeStores(dataDirectory, fixtureStores('Current'));
+  const before = readStoreBytes(dataDirectory);
+
+  const result = await restoreBackup(backupJson(backup), { dataDirectory, operationsDirectory });
+  assert.deepEqual(result.restoredStores, ['imports', 'transactions']);
+  assert.deepEqual(result.clearedStores, []);
+  const restored = readStores(dataDirectory);
+  assert.deepEqual(restored.imports, backup.data.imports);
+  assert.deepEqual(restored.transactions, backup.data.transactions);
+  for (const key of ['workspaces', 'accounts', 'categories', 'importTemplates', 'budgets', 'rules'] as const) {
+    assert.equal(fs.readFileSync(path.join(dataDirectory, PERSISTED_STORES[key].filename)).equals(before[key]), true);
+  }
+});
+
+test('Activity restore blocks missing preserved workspace, account, category, and transfer dependencies', async () => {
+  const backup = await createFixtureBackup('activity');
+
+  const missingWorkspace = fixtureStores('Current');
+  missingWorkspace.workspaces[0].id = 'ws2';
+  for (const key of ['accounts', 'imports', 'importTemplates', 'budgets', 'rules', 'transactions'] as const) {
+    for (const record of missingWorkspace[key]) record.workspaceId = 'ws2';
+  }
+
+  const missingAccount = fixtureStores('Current');
+  missingAccount.accounts = missingAccount.accounts.filter((account) => account.id !== 'acc-a');
+  missingAccount.imports = [];
+  missingAccount.transactions = [];
+  missingAccount.importTemplates = [];
+  missingAccount.rules = [];
+
+  const missingCategory = fixtureStores('Current');
+  missingCategory.categories = missingCategory.categories.filter((category) => category.id !== 'cat_restaurants');
+  missingCategory.imports = [];
+  missingCategory.transactions = [];
+  missingCategory.rules = [];
+  missingCategory.budgets = [];
+
+  for (const stores of [missingWorkspace, missingAccount, missingCategory]) {
+    const root = makeRoot();
+    const dataDirectory = path.join(root, 'data');
+    const operationsDirectory = path.join(root, 'operations');
+    writeStores(dataDirectory, stores);
+    await expectCode(
+      () => previewRestore(backupJson(backup), { dataDirectory, operationsDirectory }),
+      'REFERENTIAL_INTEGRITY_FAILURE'
+    );
+    await expectCode(
+      () => restoreBackup(backupJson(backup), { dataDirectory, operationsDirectory }),
+      'REFERENTIAL_INTEGRITY_FAILURE'
+    );
+  }
+
+  const brokenTransfer = await createFixtureBackup('activity', linkedFixtureStores());
+  brokenTransfer.data.transactions![0].linkedTransactionId = 'missing-transfer';
+  refreshStoreManifest(brokenTransfer, 'transactions');
+  const root = makeRoot();
+  const dataDirectory = path.join(root, 'data');
+  const operationsDirectory = path.join(root, 'operations');
+  writeStores(dataDirectory, fixtureStores('Current'));
+  await expectCode(
+    () => restoreBackup(backupJson(brokenTransfer), { dataDirectory, operationsDirectory }),
+    'REFERENTIAL_INTEGRITY_FAILURE'
+  );
+
+  const invalidSubcategory = await createFixtureBackup('activity');
+  invalidSubcategory.data.transactions![0].categoryId = 'cat_housing';
+  invalidSubcategory.data.transactions![0].subcategoryId = 'sub_cafes';
+  refreshStoreManifest(invalidSubcategory, 'transactions');
+  await expectCode(
+    () => previewRestore(backupJson(invalidSubcategory), { dataDirectory, operationsDirectory }),
+    'REFERENTIAL_INTEGRITY_FAILURE'
+  );
+});
+
+test('Financial Data restore replaces seven stores and preserves workspaces byte-for-byte', async () => {
+  const backup = await createFixtureBackup('financial_data', fixtureStores('Restored'));
+  const root = makeRoot();
+  const dataDirectory = path.join(root, 'data');
+  const operationsDirectory = path.join(root, 'operations');
+  writeStores(dataDirectory, fixtureStores('Current'));
+  const workspaceBytes = fs.readFileSync(path.join(dataDirectory, 'workspaces.json'));
+
+  const result = await restoreBackup(backupJson(backup), { dataDirectory, operationsDirectory });
+  assert.deepEqual(result.restoredStores, ['categories', 'accounts', 'imports', 'importTemplates', 'budgets', 'rules', 'transactions']);
+  assert.equal(fs.readFileSync(path.join(dataDirectory, 'workspaces.json')).equals(workspaceBytes), true);
+  const restored = readStores(dataDirectory);
+  for (const key of BACKUP_SCOPE_STORES.financial_data) assert.deepEqual(restored[key], backup.data[key]);
+});
+
+test('Financial Data restore blocks workspace IDs absent from current preserved workspaces', async () => {
+  const backup = await createFixtureBackup('financial_data');
+  const current = fixtureStores('Current');
+  current.workspaces[0].id = 'ws2';
+  for (const key of ['accounts', 'imports', 'importTemplates', 'budgets', 'rules', 'transactions'] as const) {
+    for (const record of current[key]) record.workspaceId = 'ws2';
+  }
+  const root = makeRoot();
+  const dataDirectory = path.join(root, 'data');
+  const operationsDirectory = path.join(root, 'operations');
+  writeStores(dataDirectory, current);
+  await expectCode(
+    () => restoreBackup(backupJson(backup), { dataDirectory, operationsDirectory }),
+    'REFERENTIAL_INTEGRITY_FAILURE'
+  );
 });
 
 test('snapshot and uniquely named stage files exist before deterministic replacement, then clean up', async () => {

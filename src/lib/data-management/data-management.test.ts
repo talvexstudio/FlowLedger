@@ -18,6 +18,7 @@ import {
 } from './default-data';
 import {
   BACKUP_SCOPE_STORES,
+  DATA_SCOPE_DEFINITIONS,
   PERSISTED_STORE_KEYS,
   PERSISTED_STORES,
   type PersistedStoreKey,
@@ -109,10 +110,19 @@ test('manifest contains exactly the eight canonical stores and schema versions',
 });
 
 test('backup scopes contain exactly their required stores', () => {
-  assert.deepEqual(BACKUP_SCOPE_STORES.financial_activity, [
-    'workspaces', 'accounts', 'categories', 'imports', 'transactions',
+  assert.deepEqual(BACKUP_SCOPE_STORES.activity, ['imports', 'transactions']);
+  assert.deepEqual(BACKUP_SCOPE_STORES.financial_data, [
+    'accounts', 'categories', 'imports', 'importTemplates', 'budgets', 'rules', 'transactions',
   ]);
   assert.deepEqual(BACKUP_SCOPE_STORES.everything, PERSISTED_STORE_KEYS);
+  assert.deepEqual(
+    Object.values(DATA_SCOPE_DEFINITIONS).map(({ key, label, description }) => ({ key, label, description })),
+    [
+      { key: 'activity', label: 'Activity', description: 'Transactions and import history' },
+      { key: 'financial_data', label: 'Financial Data', description: 'Accounts, categories, transactions, imports, import templates, budgets, and rules' },
+      { key: 'everything', label: 'Everything', description: 'All FlowLedger data, including workspaces' },
+    ]
+  );
 });
 
 test('backup ordering, checksums, counts, metadata, and workspace IDs are deterministic', async () => {
@@ -163,12 +173,12 @@ test('invalid top-level shape and missing required record fields fail backup exp
   const shapeDirectory = makeTempDirectory();
   writeFixtureStores(shapeDirectory);
   fs.writeFileSync(path.join(shapeDirectory, 'accounts.json'), '{}', 'utf-8');
-  await assert.rejects(createBackup('financial_activity', { dataDirectory: shapeDirectory }), /accounts\.json/);
+  await assert.rejects(createBackup('financial_data', { dataDirectory: shapeDirectory }), /accounts\.json/);
 
   const recordDirectory = makeTempDirectory();
   writeFixtureStores(recordDirectory);
   fs.writeFileSync(path.join(recordDirectory, 'accounts.json'), JSON.stringify([{ id: 'broken' }]), 'utf-8');
-  await assert.rejects(createBackup('financial_activity', { dataDirectory: recordDirectory }), /accounts\.json/);
+  await assert.rejects(createBackup('financial_data', { dataDirectory: recordDirectory }), /accounts\.json/);
 });
 
 test('unknown backup scope is rejected', async () => {
@@ -247,7 +257,7 @@ test('backup read waits for and captures one coherent locked snapshot', async ()
     writeFixtureStores(directory, stores);
   });
   await started;
-  const backupPromise = createBackup('financial_activity', { dataDirectory: directory, now: () => new Date(now) });
+  const backupPromise = createBackup('financial_data', { dataDirectory: directory, now: () => new Date(now) });
   const [, backup] = await Promise.all([writer, backupPromise]);
   assert.equal(backup.data.accounts?.[0].name, 'Updated account');
   assert.equal(
@@ -279,18 +289,18 @@ test('backup API returns downloadable JSON and writes no backup artifact under d
     const response = await backupPost(new Request('http://localhost/api/data-management/backup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope: 'financial_activity' }),
+      body: JSON.stringify({ scope: 'activity' }),
     }));
     assert.equal(response.status, 200);
     assert.match(response.headers.get('Content-Type') ?? '', /^application\/json/);
     assert.match(
       response.headers.get('Content-Disposition') ?? '',
-      /^attachment; filename="flowledger-backup-.*-financial-activity\.json"$/
+      /^attachment; filename="flowledger-backup-.*-activity\.json"$/
     );
     const body = await response.json();
-    assert.equal(body.scope, 'financial_activity');
-    assert.deepEqual(body.includedStores, [...BACKUP_SCOPE_STORES.financial_activity]);
-    assert.deepEqual(Object.keys(body.data), [...BACKUP_SCOPE_STORES.financial_activity]);
+    assert.equal(body.scope, 'activity');
+    assert.deepEqual(body.includedStores, [...BACKUP_SCOPE_STORES.activity]);
+    assert.deepEqual(Object.keys(body.data), [...BACKUP_SCOPE_STORES.activity]);
     assert.deepEqual(fs.readdirSync(directory).sort(), filesBefore);
   } finally {
     if (previousDirectory === undefined) delete process.env.FLOWLEDGER_DATA_DIR;
@@ -306,4 +316,28 @@ test('backup API rejects an unknown scope', async () => {
   }));
   assert.equal(response.status, 400);
   assert.deepEqual(await response.json(), { error: 'Unsupported backup scope.' });
+});
+
+test('legacy financial_activity is restore-only and cannot be created by the backup API', async () => {
+  const response = await backupPost(new Request('http://localhost/api/data-management/backup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scope: 'financial_activity' }),
+  }));
+  assert.equal(response.status, 400);
+});
+
+test('all three new scopes emit matching counts and checksums for exactly their stores', async () => {
+  const directory = makeTempDirectory();
+  writeFixtureStores(directory);
+  for (const scope of ['activity', 'financial_data', 'everything'] as const) {
+    const backup = await createBackup(scope, { dataDirectory: directory, now: () => new Date(now) });
+    assert.deepEqual(backup.includedStores, [...BACKUP_SCOPE_STORES[scope]]);
+    assert.deepEqual(Object.keys(backup.data), [...BACKUP_SCOPE_STORES[scope]]);
+    for (const entry of backup.storeManifest) {
+      const records = backup.data[entry.key]!;
+      assert.equal(entry.recordCount, records.length);
+      assert.equal(entry.sha256, calculateStoreChecksum(records));
+    }
+  }
 });

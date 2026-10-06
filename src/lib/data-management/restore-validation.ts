@@ -5,12 +5,14 @@ import {
 } from './backup';
 import { RestoreError } from './restore-errors';
 import {
-  BACKUP_SCOPE_STORES,
-  isBackupScope,
+  DATA_SCOPE_DEFINITIONS,
+  isRestoreScope,
+  LEGACY_RESTORE_SCOPE,
   PERSISTED_STORE_KEYS,
   PERSISTED_STORES,
-  type BackupScope,
+  RESTORE_SCOPE_STORES,
   type PersistedStoreKey,
+  type RestoreScope,
 } from './store-manifest';
 import { BACKUP_FORMAT_VERSION } from './version';
 
@@ -21,7 +23,7 @@ export type ValidatedRestoreBackup = {
   flowLedgerVersion: string;
   minimumCompatibleFlowLedgerVersion?: string;
   createdAt: string;
-  scope: BackupScope;
+  scope: RestoreScope;
   workspaceIds: string[];
   includedStores: PersistedStoreKey[];
   data: Record<PersistedStoreKey, BackupRecord[]>;
@@ -30,10 +32,14 @@ export type ValidatedRestoreBackup = {
 export type RestorePreview = {
   createdAt: string;
   flowLedgerVersion: string;
-  scope: BackupScope;
+  scope: RestoreScope;
+  scopeLabel: string;
+  isLegacy: boolean;
   workspaceCount: number;
   counts: Record<PersistedStoreKey, number>;
   includedStores: PersistedStoreKey[];
+  replacementStores: PersistedStoreKey[];
+  preservedStores: PersistedStoreKey[];
   storesToClear: PersistedStoreKey[];
   compatibilityStatus: 'compatible';
   validationResult: 'valid';
@@ -300,8 +306,8 @@ export const validateRestoreBackup = (input: unknown): ValidatedRestoreBackup =>
     requireString(backup, 'minimumCompatibleFlowLedgerVersion');
   }
   const createdAt = requireDate(backup, 'createdAt');
-  if (!isBackupScope(backup.scope)) invalid('The backup scope is missing or unsupported.');
-  const scope = backup.scope as BackupScope;
+  if (!isRestoreScope(backup.scope)) invalid('The backup scope is missing or unsupported.');
+  const scope = backup.scope as RestoreScope;
   if (backup.containsSensitiveFinancialData !== true) {
     invalid('containsSensitiveFinancialData is missing or invalid.');
   }
@@ -318,7 +324,7 @@ export const validateRestoreBackup = (input: unknown): ValidatedRestoreBackup =>
     invalid('workspaceSelection.ids is invalid.');
   }
 
-  const expectedStores = [...BACKUP_SCOPE_STORES[scope]];
+  const expectedStores = [...RESTORE_SCOPE_STORES[scope]];
   const includedStores = requireStoreKeys(backup.includedStores, 'includedStores');
   if (!equalMembers(includedStores, expectedStores)) {
     invalid('includedStores does not exactly match the declared backup scope.');
@@ -387,7 +393,9 @@ export const validateRestoreBackup = (input: unknown): ValidatedRestoreBackup =>
     invalid('workspaceSelection.ids does not match the workspaces represented in the backup.');
   }
 
-  validateRestoreReferences(canonicalData);
+  if (scope === 'everything' || scope === LEGACY_RESTORE_SCOPE) {
+    validateRestoreReferences(canonicalData);
+  }
 
   return {
     backupFormatVersion: formatVersion as number,
@@ -415,12 +423,24 @@ export const buildRestorePreview = (backup: ValidatedRestoreBackup): RestorePrev
   createdAt: backup.createdAt,
   flowLedgerVersion: backup.flowLedgerVersion,
   scope: backup.scope,
-  workspaceCount: backup.data.workspaces.length,
+  scopeLabel: backup.scope === LEGACY_RESTORE_SCOPE
+    ? 'Legacy Financial activity'
+    : DATA_SCOPE_DEFINITIONS[backup.scope].label,
+  isLegacy: backup.scope === LEGACY_RESTORE_SCOPE,
+  workspaceCount: backup.workspaceIds.length,
   counts: Object.fromEntries(
     PERSISTED_STORE_KEYS.map((key) => [key, backup.data[key].length])
   ) as Record<PersistedStoreKey, number>,
   includedStores: [...backup.includedStores],
-  storesToClear: PERSISTED_STORE_KEYS.filter((key) => !backup.includedStores.includes(key)),
+  replacementStores: backup.scope === LEGACY_RESTORE_SCOPE
+    ? [...PERSISTED_STORE_KEYS]
+    : [...backup.includedStores],
+  preservedStores: backup.scope === LEGACY_RESTORE_SCOPE
+    ? []
+    : PERSISTED_STORE_KEYS.filter((key) => !backup.includedStores.includes(key)),
+  storesToClear: backup.scope === LEGACY_RESTORE_SCOPE
+    ? PERSISTED_STORE_KEYS.filter((key) => !backup.includedStores.includes(key))
+    : [],
   compatibilityStatus: 'compatible',
   validationResult: 'valid',
 });
