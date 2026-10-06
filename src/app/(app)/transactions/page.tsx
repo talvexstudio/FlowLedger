@@ -9,7 +9,8 @@ import {
   apiSaveTransaction,
   apiConfirmTransaction,
   apiDeleteTransaction,
-  apiDeleteTransactions,
+  apiPreviewTransactionBulkDelete,
+  apiBulkDeleteTransactions,
   apiGetRules,
   apiSaveRule,
 } from "@/lib/api";
@@ -169,24 +170,74 @@ export default function TransactionsPage() {
         }
     }
 
-    const handleBulkDelete = async (ids: string[]) => {
-        if (!workspaceId || ids.length === 0) return;
+    const handleBulkDeletePreview = async (ids: string[]) => {
+        if (!workspaceId || ids.length === 0) return null;
         try {
-            await apiDeleteTransactions(workspaceId, ids);
+            return await apiPreviewTransactionBulkDelete(workspaceId, ids);
+        } catch (error) {
+            console.error(error);
+            toast({
+                variant: 'destructive',
+                title: 'Deletion preview failed',
+                description: error instanceof Error ? error.message : 'Could not review the selected transactions.',
+            });
+            return null;
+        }
+    }
+
+    const handleBulkDelete = async (ids: string[]) => {
+        if (!workspaceId || ids.length === 0) return false;
+        try {
+            const result = await apiBulkDeleteTransactions(workspaceId, ids);
             await reloadTransactions();
             toast({
               title: 'Transactions Deleted',
-              description: `Deleted ${ids.length} transaction(s).`,
+              description: `Deleted ${result.deletedTransactions} transaction(s).`,
             });
+            return true;
         } catch (error) {
             console.error(error);
             toast({
                 variant: 'destructive',
                 title: 'Bulk delete failed',
-                description: 'Could not delete the selected transactions.',
+                description: error instanceof Error ? error.message : 'Could not delete the selected transactions.',
             });
+            return false;
         }
     }
+
+    const handleExportActivityBackup = async () => {
+        try {
+            const response = await fetch('/api/data-management/backup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scope: 'activity' }),
+            });
+            if (!response.ok) {
+                const payload = await response.json().catch(() => null) as { error?: string } | null;
+                throw new Error(payload?.error ?? 'Could not export the Activity backup.');
+            }
+            const blob = await response.blob();
+            const disposition = response.headers.get('Content-Disposition');
+            const filename = disposition?.match(/filename="?([^";]+)"?/i)?.[1]
+                ?? 'flowledger-backup-activity.json';
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            toast({ title: 'Activity backup exported', description: 'The backup was downloaded to your device.' });
+        } catch (error) {
+            toast({
+                variant: 'destructive',
+                title: 'Backup failed',
+                description: error instanceof Error ? error.message : 'Could not export the Activity backup.',
+            });
+        }
+    };
 
     const handleConfirmBackfill = async (selectedIds: string[]) => {
         if (!workspaceId || !pendingRule) return;
@@ -257,7 +308,9 @@ export default function TransactionsPage() {
           onEdit={handleEdit}
           onConfirm={handleConfirm}
           onDelete={handleDelete}
+          onBulkDeletePreview={handleBulkDeletePreview}
           onBulkDelete={handleBulkDelete}
+          onExportActivityBackup={handleExportActivityBackup}
         />
       </div>
       <TransactionFormSheet 
