@@ -10,7 +10,7 @@ import {
   getTransactions,
   saveTransaction,
 } from "./transactions";
-import { getAccounts } from './accounts';
+import { getAccounts, requireAccount } from './accounts';
 import { normalizeTransactionTypeFields, validateInternalTransfer } from '../internal-transfer';
 
 const importsCollection = (workspaceId: string) => `workspaces/${workspaceId}/imports`;
@@ -20,8 +20,10 @@ export const saveImportSession = async (
   workspaceId: string,
   session: Omit<ImportSession, "id">
 ): Promise<ImportSession> => {
-  const docRef = await db.collection(importsCollection(workspaceId)).add(session);
-  return { ...session, id: docRef.id };
+  await requireAccount(workspaceId, session.accountId);
+  const payload = { ...session, workspaceId };
+  const docRef = await db.collection(importsCollection(workspaceId)).add(payload);
+  return { ...payload, id: docRef.id };
 };
 
 export const getImportSessions = async (workspaceId: string): Promise<ImportSession[]> => {
@@ -42,17 +44,56 @@ export const getImportTemplates = async (
   );
 };
 
+export const getImportTemplate = async (
+  workspaceId: string,
+  templateId: string
+): Promise<ImportTemplate | null> => {
+  const snapshot = await db.collection(templatesCollection(workspaceId)).doc(templateId).get();
+  return snapshot.exists
+    ? ({ id: templateId, ...snapshot.data() } as ImportTemplate)
+    : null;
+};
+
 export const saveImportTemplate = async (
   workspaceId: string,
-  data: Omit<ImportTemplate, "id" | "createdAt">
+  data: Omit<ImportTemplate, "id" | "createdAt"> & {
+    id?: string;
+    createdAt?: Date;
+  }
 ): Promise<ImportTemplate> => {
+  if (data.defaultAccountId) {
+    await requireAccount(workspaceId, data.defaultAccountId);
+  }
   const coll = db.collection(templatesCollection(workspaceId));
+  if (data.id) {
+    const existing = await getImportTemplate(workspaceId, data.id);
+    if (!existing) throw new Error('Import template not found in the selected workspace.');
+    const { id, createdAt: _createdAt, ...templateData } = data;
+    const payload = {
+      ...templateData,
+      workspaceId,
+      createdAt: existing.createdAt,
+    } as Omit<ImportTemplate, 'id'>;
+    await coll.doc(id).set(payload, { merge: true });
+    return { ...existing, ...payload, id };
+  }
+  const { id: _id, createdAt: _createdAt, ...templateData } = data;
   const payload: Omit<ImportTemplate, "id"> = {
-    ...data,
+    ...templateData,
+    workspaceId,
     createdAt: new Date(),
   };
   const docRef = await coll.add(payload);
   return { ...payload, id: docRef.id };
+};
+
+export const deleteImportTemplate = async (
+  workspaceId: string,
+  templateId: string
+): Promise<void> => {
+  const existing = await getImportTemplate(workspaceId, templateId);
+  if (!existing) throw new Error('Import template not found in the selected workspace.');
+  await db.collection(templatesCollection(workspaceId)).doc(templateId).delete();
 };
 
 export const findMatchingTemplate = async (

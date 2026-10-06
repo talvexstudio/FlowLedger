@@ -9,6 +9,55 @@ const transactionsCollection = (workspaceId: string) => `workspaces/${workspaceI
 const amountToCents = (amount: number) => Math.round(amount * 100);
 const directionForAmount = (amount: number): 'Out' | 'In' => amount < 0 ? 'Out' : 'In';
 
+const assertDocumentExistsInWorkspace = async (
+    workspaceId: string,
+    collectionName: 'imports' | 'transactions',
+    id: string,
+    label: string
+) => {
+    const snapshot = await db
+        .collection(`workspaces/${workspaceId}/${collectionName}`)
+        .doc(id)
+        .get();
+    if (!snapshot.exists) throw new Error(`${label} not found in the selected workspace.`);
+};
+
+const validateTransactionWorkspaceReferences = async (
+    workspaceId: string,
+    transaction: Partial<Transaction>
+) => {
+    const accounts = await getAccounts(workspaceId);
+    const accountIds = new Set(accounts.map((account) => account.id));
+    if (!transaction.accountId || !accountIds.has(transaction.accountId)) {
+        throw new Error('Transaction account not found in the selected workspace.');
+    }
+    if (
+        transaction.destinationAccountId &&
+        !accountIds.has(transaction.destinationAccountId)
+    ) {
+        throw new Error('Counterpart account not found in the selected workspace.');
+    }
+    if (transaction.importId) {
+        await assertDocumentExistsInWorkspace(
+            workspaceId,
+            'imports',
+            transaction.importId,
+            'Import session'
+        );
+    }
+    if (transaction.linkedTransactionId) {
+        if (transaction.id && transaction.linkedTransactionId === transaction.id) {
+            throw new Error('A transaction cannot link to itself.');
+        }
+        await assertDocumentExistsInWorkspace(
+            workspaceId,
+            'transactions',
+            transaction.linkedTransactionId,
+            'Linked transaction'
+        );
+    }
+};
+
 export class TransferResolutionError extends Error {
     constructor(message: string, public readonly status = 409) {
         super(message);
@@ -123,6 +172,9 @@ export const saveTransaction = async (workspaceId: string, transactionData: Part
     const coll = db.collection(transactionsCollection(workspaceId));
     if (transactionData.id) {
         const currentSnapshot = await coll.doc(transactionData.id).get();
+        if (!currentSnapshot.exists) {
+            throw new Error('Transaction not found in the selected workspace.');
+        }
         const current = currentSnapshot.data() as Partial<Transaction> | undefined;
         let merged = normalizeTransactionTypeFields({
             ...current,
@@ -137,6 +189,7 @@ export const saveTransaction = async (workspaceId: string, transactionData: Part
         }
         merged = await enforceInternalTransferReview(workspaceId, merged);
         const normalizedData = normalizeAmountBase(merged);
+        await validateTransactionWorkspaceReferences(workspaceId, normalizedData);
         const { id, ...data } = normalizedData;
         await coll.doc(transactionData.id).set({
             ...data,
@@ -151,6 +204,7 @@ export const saveTransaction = async (workspaceId: string, transactionData: Part
         const normalizedData = normalizeAmountBase(
             await enforceInternalTransferReview(workspaceId, normalizedFields)
         );
+        await validateTransactionWorkspaceReferences(workspaceId, normalizedData);
         const docRef = await coll.add({
             ...normalizedData,
             createdAt: new Date(),
@@ -171,6 +225,12 @@ const defaultInternalTransferPairDependencies: InternalTransferPairDependencies 
     getAccounts,
     saveTransaction,
     linkSource: async (workspaceId, sourceId, destinationId) => {
+        await assertDocumentExistsInWorkspace(
+            workspaceId,
+            'transactions',
+            destinationId,
+            'Linked transaction'
+        );
         await db.collection(transactionsCollection(workspaceId)).doc(sourceId).set(
             { linkedTransactionId: destinationId },
             { merge: true }
@@ -266,6 +326,7 @@ const writeTransactionRecord = async (
     workspaceId: string,
     transaction: Transaction
 ): Promise<Transaction> => {
+    await validateTransactionWorkspaceReferences(workspaceId, transaction);
     const { id, ...data } = transaction;
     const updated = { ...data, workspaceId, updatedAt: new Date() } as Omit<Transaction, 'id'>;
     await db.collection(transactionsCollection(workspaceId)).doc(id).set(updated);

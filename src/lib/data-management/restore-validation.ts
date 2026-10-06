@@ -225,6 +225,7 @@ export const validateRestoreReferences = (
       .filter((record) => record.recordType !== 'line')
       .map((record) => [recordId(record), record])
   );
+  const budgetYears = new Set<string>();
   for (const budget of budgets.values()) {
     const workspaceId = optionalString(budget, 'workspaceId');
     requireReference(workspaces, workspaceId, 'A budget references a missing workspace.');
@@ -235,6 +236,15 @@ export const validateRestoreReferences = (
         throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'A budget line belongs to a different workspace than its header.');
       }
       validateCategoryReference(budget, 'A budget line', categories, subcategoryParents);
+    } else {
+      const budgetYearKey = `${workspaceId ?? ''}:${String(budget.year)}`;
+      if (budgetYears.has(budgetYearKey)) {
+        throw new RestoreError(
+          'REFERENTIAL_INTEGRITY_FAILURE',
+          'More than one budget exists for the same workspace and year.'
+        );
+      }
+      budgetYears.add(budgetYearKey);
     }
   }
 
