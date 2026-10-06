@@ -8,6 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Separator } from '@/components/ui/separator';
+import { ImportHistoryPanel } from '@/components/settings/import-history-panel';
 import { useToast } from '@/hooks/use-toast';
 import type { DataResetOperation, DataResetPreview } from '@/lib/data-management/data-reset';
 import {
@@ -453,6 +454,13 @@ export function DataStoragePanel() {
             </div>
           )}
         </section>
+
+        <Separator />
+
+        <ImportHistoryPanel
+          externalBusy={exporting || restoring || resetting}
+          onExportActivityBackup={() => exportBackup('activity')}
+        />
       </CardContent>
     </Card>
   );
