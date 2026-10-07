@@ -30,16 +30,9 @@ import {
 } from '@/lib/data-management/store-manifest';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { persistWorkspaceId } from '@/lib/workspace-selection';
+import { downloadBackup } from '@/lib/data-management/backup-download';
 
 type RestoreApiError = { error?: { code?: string; message?: string } };
-
-const fallbackFilename = (scope: BackupScope) =>
-  `flowledger-backup-${scope.replace(/_/g, '-')}.json`;
-
-const responseFilename = (header: string | null, scope: BackupScope) => {
-  const match = header?.match(/filename="?([^";]+)"?/i);
-  return match?.[1] ?? fallbackFilename(scope);
-};
 
 const STORE_LABELS: Record<PersistedStoreKey, string> = {
   workspaces: 'Workspaces',
@@ -76,29 +69,7 @@ export function DataStoragePanel() {
     }
     setExporting(true);
     try {
-      const response = await fetch('/api/data-management/backup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scope: backupScope,
-          ...(backupScope !== 'everything' ? { workspaceId } : {}),
-        }),
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null) as { error?: string } | null;
-        throw new Error(payload?.error ?? 'Could not export the backup.');
-      }
-
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = responseFilename(response.headers.get('Content-Disposition'), backupScope);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      await downloadBackup(backupScope, workspaceId);
 
       toast({ title: 'Backup exported', description: 'The backup was downloaded to your device.' });
     } catch (error) {

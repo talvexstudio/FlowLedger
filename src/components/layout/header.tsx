@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   SidebarTrigger,
@@ -20,12 +20,18 @@ import {
   Avatar,
   AvatarFallback,
 } from '@/components/ui/avatar';
-import { ChevronsUpDown, LogOut, Pencil, Plus, User } from 'lucide-react';
+import { ChevronsUpDown, LogOut, Pencil, Plus, Trash2, User } from 'lucide-react';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { useToast } from '@/hooks/use-toast';
 import { getWorkspaceSelectorLabel } from '@/lib/workspace-selection';
+import {
+  resolveQueuedWorkspaceDialog,
+  type WorkspaceMenuDialogAction,
+} from '@/lib/workspace-menu-state';
 import type { CreateWorkspaceInput } from '@/lib/workspace-lifecycle-types';
+import type { Workspace } from '@/lib/types';
 import { WorkspaceFormDialog } from './workspace-form-dialog';
+import { WorkspaceDeleteDialog } from './workspace-delete-dialog';
 import Link from 'next/link';
 
 
@@ -36,13 +42,35 @@ export function AppHeader() {
     setWorkspaceId,
     createWorkspace,
     renameWorkspace,
+    deleteWorkspace,
     isLoading,
   } = useFlowLedger();
   const { toast } = useToast();
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [pendingDialog, setPendingDialog] = useState<WorkspaceMenuDialogAction | null>(null);
   const [dialogMode, setDialogMode] = useState<'create' | 'rename' | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteTargetWorkspace, setDeleteTargetWorkspace] = useState<Workspace | undefined>();
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
   const workspaceLabel = getWorkspaceSelectorLabel(workspaces, workspaceId, isLoading);
   const currentWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
+
+  useEffect(() => {
+    const action = resolveQueuedWorkspaceDialog(workspaceMenuOpen, pendingDialog);
+    if (!action) return;
+    setPendingDialog(null);
+    if (action === 'delete') {
+      setDeleteDialogOpen(true);
+    } else {
+      setDialogMode(action);
+    }
+  }, [pendingDialog, workspaceMenuOpen]);
+
+  const queueWorkspaceDialog = (action: WorkspaceMenuDialogAction) => {
+    if (action === 'delete') setDeleteTargetWorkspace(currentWorkspace);
+    setPendingDialog(action);
+    setWorkspaceMenuOpen(false);
+  };
 
   const handleCreate = async (input: CreateWorkspaceInput) => {
     setIsSavingWorkspace(true);
@@ -87,7 +115,7 @@ export function AppHeader() {
       </div>
       
       <div className="flex items-center gap-4">
-        <DropdownMenu>
+        <DropdownMenu open={workspaceMenuOpen} onOpenChange={setWorkspaceMenuOpen}>
             <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="w-48 justify-between">
                     {workspaceLabel}
@@ -102,16 +130,24 @@ export function AppHeader() {
                     ))}
                 </DropdownMenuRadioGroup>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => setDialogMode('create')}>
+                <DropdownMenuItem onSelect={() => queueWorkspaceDialog('create')}>
                   <Plus className="mr-2 h-4 w-4" />
                   New workspace
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onSelect={() => setDialogMode('rename')}
+                  onSelect={() => queueWorkspaceDialog('rename')}
                   disabled={!currentWorkspace}
                 >
                   <Pencil className="mr-2 h-4 w-4" />
                   Rename workspace
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => queueWorkspaceDialog('delete')}
+                  disabled={!currentWorkspace}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete workspace
                 </DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>
@@ -156,6 +192,15 @@ export function AppHeader() {
         onCreate={handleCreate}
         onRename={handleRename}
         isSaving={isSavingWorkspace}
+      />
+      <WorkspaceDeleteDialog
+        isOpen={deleteDialogOpen}
+        workspace={deleteTargetWorkspace}
+        onOpenChange={(open) => {
+          setDeleteDialogOpen(open);
+          if (!open) setDeleteTargetWorkspace(undefined);
+        }}
+        onDelete={deleteWorkspace}
       />
     </header>
   );

@@ -28,6 +28,10 @@ import type {
   CreateWorkspaceInput,
   CreateWorkspaceResult,
 } from '@/lib/workspace-lifecycle-types';
+import type {
+  WorkspaceDeletionPreview,
+  WorkspaceDeletionResult,
+} from '@/lib/data-management/workspace-deletion-types';
 
 async function call<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -35,7 +39,12 @@ async function call<T>(url: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   const json = await res.json();
-  if (!res.ok) throw new Error(json?.error ?? `Request failed: ${res.status}`);
+  if (!res.ok) {
+    const message = typeof json?.error === 'string'
+      ? json.error
+      : json?.error?.message;
+    throw new Error(message ?? `Request failed: ${res.status}`);
+  }
   return json as T;
 }
 
@@ -54,6 +63,18 @@ export const apiRenameWorkspace = (workspaceId: string, name: string) =>
     method: 'PATCH',
     body: JSON.stringify({ workspaceId, name }),
   });
+
+export const apiPreviewWorkspaceDeletion = (workspaceId: string) =>
+  call<{ ok: true; preview: WorkspaceDeletionPreview }>(
+    '/api/data-management/workspaces/delete/preview',
+    { method: 'POST', body: JSON.stringify({ workspaceId }) }
+  ).then((response) => response.preview);
+
+export const apiDeleteWorkspace = (workspaceId: string) =>
+  call<{ ok: true; result: WorkspaceDeletionResult }>(
+    '/api/data-management/workspaces/delete',
+    { method: 'POST', body: JSON.stringify({ workspaceId, confirmDelete: true }) }
+  ).then((response) => response.result);
 
 // ─── Accounts ──────────────────────────────────────────────────────────────
 export const apiGetAccounts = (workspaceId: string) =>

@@ -20,7 +20,8 @@ export type DataManagementOperationKind =
   | 'import-history-delete'
   | 'transaction-bulk-delete'
   | 'workspace-create'
-  | 'workspace-rename';
+  | 'workspace-rename'
+  | 'workspace-delete';
 
 export type RestoreJournalState = 'prepared' | 'replacing' | 'rollback_failed' | 'rolled_back' | 'completed';
 

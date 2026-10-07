@@ -10,6 +10,7 @@ import {
   apiGetBudget,
   apiCreateWorkspace,
   apiRenameWorkspace,
+  apiDeleteWorkspace,
 } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -19,10 +20,12 @@ import {
 } from '@/lib/workspace-selection';
 import {
   appendCreatedWorkspace,
+  applyWorkspaceDeletion,
   isWorkspaceResponseCurrent,
   replaceRenamedWorkspace,
 } from '@/lib/workspace-client-state';
 import type { CreateWorkspaceInput } from '@/lib/workspace-lifecycle-types';
+import type { WorkspaceDeletionResult } from '@/lib/data-management/workspace-deletion-types';
 
 interface FlowLedgerContextType {
   workspaces: Workspace[];
@@ -30,6 +33,7 @@ interface FlowLedgerContextType {
   setWorkspaceId: (id: string) => void;
   createWorkspace: (input: CreateWorkspaceInput) => Promise<Workspace>;
   renameWorkspace: (name: string) => Promise<Workspace>;
+  deleteWorkspace: (workspaceId: string) => Promise<WorkspaceDeletionResult>;
   accounts: Account[];
   transactions: Transaction[];
   categories: (Category & { subcategories: Subcategory[] })[];
@@ -58,7 +62,9 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
   const { toast } = useToast();
   const toastRef = useRef(toast);
   const workspaceIdRef = useRef<string | null>(null);
+  const workspacesRef = useRef<Workspace[]>([]);
   toastRef.current = toast;
+  workspacesRef.current = workspaces;
 
   const getBrowserStorage = (): WorkspaceSelectionStorage | null => {
     if (typeof window === 'undefined') return null;
@@ -125,6 +131,24 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
     };
     setWorkspaces((current) => replaceRenamedWorkspace(current, renamed));
     return renamed;
+  }, []);
+
+  const deleteWorkspace = useCallback(async (workspaceIdToDelete: string) => {
+    const result = await apiDeleteWorkspace(workspaceIdToDelete);
+    const next = applyWorkspaceDeletion(workspacesRef.current, workspaceIdRef.current, result);
+    workspacesRef.current = next.workspaces;
+    setWorkspaces(next.workspaces);
+
+    if (next.selectionChanged) {
+      persistWorkspaceId(getBrowserStorage(), next.selectedWorkspaceId);
+      workspaceIdRef.current = next.selectedWorkspaceId;
+      setAccounts([]);
+      setTransactions([]);
+      setCategories([]);
+      setBudgetLines([]);
+      setWorkspaceIdState(next.selectedWorkspaceId);
+    }
+    return result;
   }, []);
 
   const fetchAccounts = useCallback(async () => {
@@ -223,6 +247,7 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
     setWorkspaceId,
     createWorkspace,
     renameWorkspace,
+    deleteWorkspace,
     accounts,
     transactions,
     categories,
@@ -234,7 +259,7 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
     reloadTransactions: fetchTransactions,
     reloadCategories: fetchCategories,
     reloadBudget: fetchBudget,
-  }), [workspaces, workspaceId, setWorkspaceId, createWorkspace, renameWorkspace, accounts, transactions, categories, budgetLines, budgetYear, isLoading, fetchWorkspaces, fetchAccounts, fetchTransactions, fetchCategories, fetchBudget]);
+  }), [workspaces, workspaceId, setWorkspaceId, createWorkspace, renameWorkspace, deleteWorkspace, accounts, transactions, categories, budgetLines, budgetYear, isLoading, fetchWorkspaces, fetchAccounts, fetchTransactions, fetchCategories, fetchBudget]);
 
   return (
     <FlowLedgerContext.Provider value={contextValue}>
