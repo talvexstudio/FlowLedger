@@ -5,6 +5,7 @@ import { requireAccount } from './accounts';
 import { getCategories } from './categories';
 import { validateCategorySelection } from '../category-ownership';
 import { assertWorkspaceDocumentExists, assertWorkspaceExists } from './workspace-integrity';
+import { needsReviewAfterClassification } from '../transaction-review';
 
 const rulesCollection = (workspaceId: string) => `workspaces/${workspaceId}/rules`;
 
@@ -191,18 +192,21 @@ export const applyRuleClassificationToTransaction = (
   }
 
   const normalized = normalizeTransactionTypeFields({ ...tx, ...updated });
-  if (normalized.type === 'InternalTransfer') {
-    return {
-      id: tx.id,
-      type: 'InternalTransfer',
-      categoryId: undefined,
-      subcategoryId: undefined,
-      isInternalTransfer: true,
-      needsReview: true,
-    };
-  }
+  const patch: Partial<Transaction> = normalized.type === 'InternalTransfer'
+    ? {
+        id: tx.id,
+        type: 'InternalTransfer',
+        categoryId: undefined,
+        subcategoryId: undefined,
+        isInternalTransfer: true,
+      }
+    : updated;
+  patch.needsReview = needsReviewAfterClassification(
+    { ...tx, ...patch },
+    categories,
+    [],
+    tx.workspaceId
+  );
 
-  updated.needsReview = false;
-
-  return updated;
+  return patch;
 };

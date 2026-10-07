@@ -25,8 +25,9 @@ import { useToast } from '@/hooks/use-toast';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { apiConfirmTransaction, apiSaveTransaction, apiSaveRule } from '@/lib/api';
-import { applyRuleClassificationToTransaction, ruleMatchesTransactionForBackfill } from '@/lib/utils/rule-utils';
+import { ruleMatchesTransactionForBackfill } from '@/lib/utils/rule-utils';
 import { RuleBackfillPanel } from '@/components/transactions/rule-backfill-panel';
+import { preflightRuleBackfill } from '@/lib/rule-backfill';
 import {
   getInternalTransferDisplay,
   getInternalTransferPairingStatus,
@@ -154,20 +155,26 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
     const rule = pendingRule;
     const candidates = backfillCandidates;
 
-    setBackfillCandidates([]);
-    setPendingRule(null);
-
     try {
-      const selected = candidates.filter((tx) => selectedIds.includes(tx.id));
-      if (selected.length > 0) {
-        for (const tx of selected) {
-          const patch = applyRuleClassificationToTransaction(tx, rule, categories);
-          await apiSaveTransaction(workspaceId, patch);
+      const plan = preflightRuleBackfill({
+        workspaceId,
+        selectedIds,
+        candidates,
+        currentTransactions: transactions,
+        rule,
+        categories,
+        accounts,
+      });
+      if (plan.length > 0) {
+        for (const item of plan) {
+          await apiSaveTransaction(workspaceId, item.patch);
         }
         await reloadTransactions();
+        setBackfillCandidates([]);
+        setPendingRule(null);
         toast({
           title: "Rule applied",
-          description: `Applied classification to ${selected.length} transaction(s).`,
+          description: `Applied classification to ${plan.length} transaction(s).`,
         });
       }
     } catch (error) {
@@ -175,7 +182,9 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
       toast({
         variant: 'destructive',
         title: 'Backfill failed',
-        description: 'Could not apply the rule to selected transactions.',
+        description: error instanceof Error
+          ? error.message
+          : 'Could not apply the rule to selected transactions.',
       });
     }
   };

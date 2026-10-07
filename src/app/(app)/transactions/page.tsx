@@ -16,7 +16,6 @@ import {
 } from "@/lib/api";
 import {
   applyRulesToTransaction,
-  applyRuleClassificationToTransaction,
   ruleMatchesTransactionForBackfill,
 } from "@/lib/utils/rule-utils";
 import { useToast } from "@/hooks/use-toast";
@@ -24,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { PlusCircle } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { RuleBackfillPanel } from "@/components/transactions/rule-backfill-panel";
+import { preflightRuleBackfill } from "@/lib/rule-backfill";
 
 
 export default function TransactionsPage() {
@@ -251,20 +251,26 @@ export default function TransactionsPage() {
         const rule = pendingRule;
         const candidates = backfillCandidates;
 
-        setBackfillCandidates([]);
-        setPendingRule(null);
-
         try {
-            const selected = candidates.filter((tx) => selectedIds.includes(tx.id));
-            if (selected.length > 0) {
-                for (const tx of selected) {
-                    const patch = applyRuleClassificationToTransaction(tx, rule, categories);
-                    await apiSaveTransaction(workspaceId, patch);
+            const plan = preflightRuleBackfill({
+                workspaceId,
+                selectedIds,
+                candidates,
+                currentTransactions: transactions,
+                rule,
+                categories,
+                accounts,
+            });
+            if (plan.length > 0) {
+                for (const item of plan) {
+                    await apiSaveTransaction(workspaceId, item.patch);
                 }
                 await reloadTransactions();
+                setBackfillCandidates([]);
+                setPendingRule(null);
                 toast({
                   title: "Rule applied",
-                  description: `Applied classification to ${selected.length} transaction(s).`,
+                  description: `Applied classification to ${plan.length} transaction(s).`,
                 });
             }
         } catch (error) {
@@ -272,7 +278,9 @@ export default function TransactionsPage() {
             toast({
                 variant: 'destructive',
                 title: 'Backfill failed',
-                description: 'Could not apply the rule to selected transactions.',
+                description: error instanceof Error
+                    ? error.message
+                    : 'Could not apply the rule to selected transactions.',
             });
         }
     };

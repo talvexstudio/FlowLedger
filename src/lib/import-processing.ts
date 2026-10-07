@@ -2,7 +2,9 @@ import { parse } from 'date-fns';
 import Papa, { type ParseResult } from 'papaparse';
 import type { Account, Category, ClassificationRule, ImportTemplate, Subcategory, Transaction } from './types';
 import { applyRulesToTransaction } from './utils/rule-utils';
-import { validateInternalTransfer } from './internal-transfer';
+import { isTransactionSufficientlyClassified } from './transaction-review';
+
+export { isTransactionSufficientlyClassified } from './transaction-review';
 
 export type ImportFileType = 'CSV' | 'XLSX' | 'PDF';
 
@@ -252,30 +254,6 @@ export const parseImportAmount = (
     return { ok: false, reason: 'Amount is malformed.' };
   }
   return { ok: true, value: negative ? -parsed : parsed };
-};
-
-export const isTransactionSufficientlyClassified = (
-  transaction: Partial<Transaction>,
-  categories: ImportCategories,
-  accounts: Account[] = [],
-  workspaceId: string = transaction.workspaceId ?? ''
-) => {
-  if (transaction.type === 'InternalTransfer') {
-    return validateInternalTransfer(transaction, accounts, workspaceId).valid;
-  }
-  if (transaction.type !== 'Expense' && transaction.type !== 'Income') return true;
-  if (!transaction.categoryId) return false;
-  const category = categories.find((candidate) => candidate.id === transaction.categoryId);
-  if (!category) return false;
-  if (transaction.type === 'Expense' && category.type === 'income') return false;
-  if (transaction.type === 'Income' && category.type === 'expense') return false;
-  if (category.subcategories.length === 0) return true;
-  if (!transaction.subcategoryId) return false;
-  const subcategory = category.subcategories.find(
-    (candidate) => candidate.id === transaction.subcategoryId
-  );
-  if (!subcategory) return false;
-  return !subcategory.flowType || subcategory.flowType === transaction.type;
 };
 
 const applyDefaultTypeFromSubcategory = (

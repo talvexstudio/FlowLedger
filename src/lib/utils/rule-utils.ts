@@ -1,7 +1,8 @@
 // Pure rule-matching utilities — no database access, safe to import in client components.
 
-import type { Category, ClassificationRule, Subcategory, Transaction } from '@/lib/types';
+import type { Account, Category, ClassificationRule, Subcategory, Transaction } from '@/lib/types';
 import { normalizeTransactionTypeFields } from '@/lib/internal-transfer';
+import { needsReviewAfterClassification } from '@/lib/transaction-review';
 
 export const applyRulesToTransaction = (
   tx: Partial<Transaction>,
@@ -69,7 +70,8 @@ export const ruleMatchesTransactionForBackfill = (
 export const applyRuleClassificationToTransaction = (
   tx: Transaction,
   rule: ClassificationRule,
-  categories: (Category & { subcategories: Subcategory[] })[]
+  categories: (Category & { subcategories: Subcategory[] })[],
+  accounts: Account[] = []
 ): Partial<Transaction> => {
   const updated: Partial<Transaction> = { id: tx.id };
 
@@ -86,17 +88,20 @@ export const applyRuleClassificationToTransaction = (
 
   if (!updated.type && rule.action.type) updated.type = rule.action.type;
   const normalized = normalizeTransactionTypeFields({ ...tx, ...updated });
-  if (normalized.type === 'InternalTransfer') {
-    return {
-      id: tx.id,
-      type: 'InternalTransfer',
-      categoryId: undefined,
-      subcategoryId: undefined,
-      isInternalTransfer: true,
-      needsReview: true,
-    };
-  }
-
-  updated.needsReview = false;
-  return updated;
+  const patch: Partial<Transaction> = normalized.type === 'InternalTransfer'
+    ? {
+        id: tx.id,
+        type: 'InternalTransfer' as const,
+        categoryId: undefined,
+        subcategoryId: undefined,
+        isInternalTransfer: true,
+      }
+    : updated;
+  patch.needsReview = needsReviewAfterClassification(
+    { ...tx, ...patch },
+    categories,
+    accounts,
+    tx.workspaceId
+  );
+  return patch;
 };
