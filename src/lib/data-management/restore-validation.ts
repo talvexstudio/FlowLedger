@@ -15,6 +15,7 @@ import {
   type RestoreScope,
 } from './store-manifest';
 import { BACKUP_FORMAT_VERSION } from './version';
+import { isWorkspaceOwnedRecord } from './workspace-scope';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -25,6 +26,17 @@ export type ValidatedRestoreBackup = {
   createdAt: string;
   scope: RestoreScope;
   workspaceIds: string[];
+  workspaceSelection: {
+    mode: 'all';
+    ids: string[];
+  } | {
+    mode: 'selected';
+    ids: [string];
+    sourceWorkspaceId: string;
+    sourceWorkspaceName: string;
+    sourceWorkspaceBaseCurrency: string;
+  };
+  isLegacyGlobal: boolean;
   includedStores: PersistedStoreKey[];
   data: Record<PersistedStoreKey, BackupRecord[]>;
 };
@@ -43,6 +55,13 @@ export type RestorePreview = {
   storesToClear: PersistedStoreKey[];
   compatibilityStatus: 'compatible';
   validationResult: 'valid';
+  workspaceStatus: 'not_applicable' | 'available' | 'missing';
+  sourceWorkspaceId?: string;
+  sourceWorkspaceName?: string;
+  sourceWorkspaceBaseCurrency?: string;
+  canRestore: boolean;
+  canRecreateWorkspace: boolean;
+  recreationBlockReason?: string;
 };
 
 const isRecord = (value: unknown): value is UnknownRecord =>
@@ -375,16 +394,48 @@ export const validateRestoreBackup = (input: unknown): ValidatedRestoreBackup =>
     invalid('containsSensitiveFinancialData is missing or invalid.');
   }
 
-  if (!isRecord(backup.workspaceSelection) || backup.workspaceSelection.mode !== 'all') {
+  if (!isRecord(backup.workspaceSelection)) {
     invalid('workspaceSelection is missing or invalid.');
   }
   const workspaceSelection = backup.workspaceSelection as UnknownRecord;
+  if (workspaceSelection.mode !== 'all' && workspaceSelection.mode !== 'selected') {
+    invalid('workspaceSelection mode is invalid.');
+  }
   if (
     !Array.isArray(workspaceSelection.ids) ||
     !workspaceSelection.ids.every((id) => typeof id === 'string' && id.trim() !== '') ||
     new Set(workspaceSelection.ids).size !== workspaceSelection.ids.length
   ) {
     invalid('workspaceSelection.ids is invalid.');
+  }
+
+  let validatedWorkspaceSelection: ValidatedRestoreBackup['workspaceSelection'];
+  if (workspaceSelection.mode === 'selected') {
+    if (scope === 'everything' || scope === LEGACY_RESTORE_SCOPE) {
+      invalid('This backup scope cannot use a selected-workspace envelope.');
+    }
+    const sourceWorkspaceId = requireString(workspaceSelection, 'sourceWorkspaceId');
+    const sourceWorkspaceName = requireString(workspaceSelection, 'sourceWorkspaceName');
+    const sourceWorkspaceBaseCurrency = requireString(workspaceSelection, 'sourceWorkspaceBaseCurrency');
+    const workspaceIds = workspaceSelection.ids as string[];
+    if (
+      workspaceIds.length !== 1 ||
+      workspaceIds[0] !== sourceWorkspaceId
+    ) {
+      invalid('workspaceSelection.ids must identify the selected source workspace.');
+    }
+    validatedWorkspaceSelection = {
+      mode: 'selected',
+      ids: [sourceWorkspaceId],
+      sourceWorkspaceId,
+      sourceWorkspaceName,
+      sourceWorkspaceBaseCurrency,
+    };
+  } else {
+    validatedWorkspaceSelection = {
+      mode: 'all',
+      ids: [...workspaceSelection.ids as string[]],
+    };
   }
 
   const expectedStores = [...RESTORE_SCOPE_STORES[scope]];
@@ -452,12 +503,36 @@ export const validateRestoreBackup = (input: unknown): ValidatedRestoreBackup =>
 
   const representedWorkspaceIds = collectWorkspaceIds(canonicalData);
   const declaredWorkspaceIds = [...workspaceSelection.ids as string[]].sort();
-  if (!equalMembers(declaredWorkspaceIds, representedWorkspaceIds)) {
-    invalid('workspaceSelection.ids does not match the workspaces represented in the backup.');
+  if (validatedWorkspaceSelection.mode === 'all') {
+    if (!equalMembers(declaredWorkspaceIds, representedWorkspaceIds)) {
+      invalid('workspaceSelection.ids does not match the workspaces represented in the backup.');
+    }
+  } else {
+    const sourceWorkspaceId = validatedWorkspaceSelection.sourceWorkspaceId;
+    if (representedWorkspaceIds.some((workspaceId) => workspaceId !== sourceWorkspaceId)) {
+      invalid('The backup payload contains records from outside its selected workspace.');
+    }
+    for (const key of includedStores) {
+      if (!canonicalData[key].every((record) => isWorkspaceOwnedRecord(key, record, sourceWorkspaceId))) {
+        invalid(`Backup data for ${key} contains records from outside its selected workspace.`);
+      }
+    }
   }
 
   if (scope === 'everything' || scope === LEGACY_RESTORE_SCOPE) {
     validateRestoreReferences(canonicalData);
+  } else if (validatedWorkspaceSelection.mode === 'selected' && scope === 'financial_data') {
+    validateRestoreReferences({
+      ...canonicalData,
+      workspaces: [{
+        id: validatedWorkspaceSelection.sourceWorkspaceId,
+        ownerUserId: 'local',
+        name: validatedWorkspaceSelection.sourceWorkspaceName,
+        baseCurrency: validatedWorkspaceSelection.sourceWorkspaceBaseCurrency,
+        createdAt,
+        updatedAt: createdAt,
+      }],
+    });
   }
 
   return {
@@ -467,6 +542,10 @@ export const validateRestoreBackup = (input: unknown): ValidatedRestoreBackup =>
     createdAt,
     scope,
     workspaceIds: representedWorkspaceIds,
+    workspaceSelection: validatedWorkspaceSelection,
+    isLegacyGlobal: scope === LEGACY_RESTORE_SCOPE || (
+      scope !== 'everything' && validatedWorkspaceSelection.mode === 'all'
+    ),
     includedStores,
     data: canonicalData,
   };
@@ -482,15 +561,23 @@ export const parseAndValidateRestoreBackup = (json: string) => {
   return validateRestoreBackup(value);
 };
 
-export const buildRestorePreview = (backup: ValidatedRestoreBackup): RestorePreview => ({
+export const buildRestorePreview = (
+  backup: ValidatedRestoreBackup,
+  workspaceStatus: RestorePreview['workspaceStatus'] = backup.workspaceSelection.mode === 'selected'
+    ? 'available'
+    : 'not_applicable',
+  recreation?: { canRecreateWorkspace: boolean; recreationBlockReason?: string }
+): RestorePreview => ({
   createdAt: backup.createdAt,
   flowLedgerVersion: backup.flowLedgerVersion,
   scope: backup.scope,
   scopeLabel: backup.scope === LEGACY_RESTORE_SCOPE
     ? 'Legacy Financial activity'
-    : DATA_SCOPE_DEFINITIONS[backup.scope].label,
-  isLegacy: backup.scope === LEGACY_RESTORE_SCOPE,
-  workspaceCount: backup.workspaceIds.length,
+    : backup.isLegacyGlobal
+      ? `Legacy global ${DATA_SCOPE_DEFINITIONS[backup.scope].label}`
+      : DATA_SCOPE_DEFINITIONS[backup.scope].label,
+  isLegacy: backup.isLegacyGlobal,
+  workspaceCount: backup.workspaceSelection.ids.length,
   counts: Object.fromEntries(
     PERSISTED_STORE_KEYS.map((key) => [key, backup.data[key].length])
   ) as Record<PersistedStoreKey, number>,
@@ -506,4 +593,13 @@ export const buildRestorePreview = (backup: ValidatedRestoreBackup): RestorePrev
     : [],
   compatibilityStatus: 'compatible',
   validationResult: 'valid',
+  workspaceStatus,
+  ...(backup.workspaceSelection.mode === 'selected' ? {
+    sourceWorkspaceId: backup.workspaceSelection.sourceWorkspaceId,
+    sourceWorkspaceName: backup.workspaceSelection.sourceWorkspaceName,
+    sourceWorkspaceBaseCurrency: backup.workspaceSelection.sourceWorkspaceBaseCurrency,
+  } : {}),
+  canRestore: workspaceStatus !== 'missing',
+  canRecreateWorkspace: workspaceStatus === 'missing' && recreation?.canRecreateWorkspace === true,
+  ...(recreation?.recreationBlockReason ? { recreationBlockReason: recreation.recreationBlockReason } : {}),
 });

@@ -6,8 +6,9 @@ export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { operation?: unknown };
-    const preview = await previewDataReset(body?.operation);
+    const body = await request.json() as { operation?: unknown; workspaceId?: unknown };
+    const workspaceId = typeof body?.workspaceId === 'string' ? body.workspaceId : undefined;
+    const preview = await previewDataReset(body?.operation, { workspaceId });
     return NextResponse.json({ ok: true, preview }, {
       headers: { 'Cache-Control': 'no-store' },
     });

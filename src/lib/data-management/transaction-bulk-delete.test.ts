@@ -383,12 +383,14 @@ test('UI state helpers clear selection only after success, clamp empty pages, an
 
 test('Activity backup, Activity restore, Clear Activity, and Import History remain compatible', async () => {
   const paths = makeDirectories();
-  const backup = await createBackup('activity', { ...paths, now: () => new Date(now) });
+  const backup = await createBackup('activity', { ...paths, workspaceId: 'ws1', now: () => new Date(now) });
   assert.deepEqual(backup.includedStores, ['imports', 'transactions']);
   await executeTransactionBulkDelete('ws1', ['tx-a'], true, paths);
   await restoreBackup(JSON.stringify(backup), paths);
   assert.equal(readStores(paths.dataDirectory).transactions.some((record) => record.id === 'tx-a'), true);
   assert.equal((await listImportHistory('ws1', paths)).find((record) => record.id === 'imp-a')?.linkedTransactionCount, 2);
-  await executeDataReset('clear_activity', true, paths);
-  assert.deepEqual(readStores(paths.dataDirectory).transactions, []);
+  await executeDataReset('clear_activity', true, { ...paths, workspaceId: 'ws1' });
+  const afterClear = readStores(paths.dataDirectory).transactions;
+  assert.equal(afterClear.some((record) => record.workspaceId === 'ws1'), false);
+  assert.equal(afterClear.some((record) => record.id === 'tx-other' && record.workspaceId === 'ws2'), true);
 });

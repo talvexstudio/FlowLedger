@@ -124,7 +124,11 @@ test('all three previews report current impact without mutating any store', asyn
   for (const operation of ['clear_activity', 'reset_financial', 'factory_reset'] as const) {
     const { dataDirectory, operationsDirectory } = makeDirectories();
     const before = readBytes(dataDirectory);
-    const preview = await previewDataReset(operation, { dataDirectory, operationsDirectory });
+    const preview = await previewDataReset(operation, {
+      dataDirectory,
+      operationsDirectory,
+      ...(operation === 'factory_reset' ? {} : { workspaceId: 'ws1' }),
+    });
     assert.equal(preview.currentCounts.transactions, 2);
     assert.equal(preview.currentCounts.imports, 1);
     assert.equal(preview.customCategoryCount, 1);
@@ -137,7 +141,7 @@ test('all three previews report current impact without mutating any store', asyn
 test('Clear Activity clears transactions and imports while preserving every setup store byte-for-byte', async () => {
   const { dataDirectory, operationsDirectory } = makeDirectories();
   const before = readBytes(dataDirectory);
-  const result = await executeDataReset('clear_activity', true, { dataDirectory, operationsDirectory });
+  const result = await executeDataReset('clear_activity', true, { dataDirectory, operationsDirectory, workspaceId: 'ws1' });
   assert.deepEqual(result.replacedStores, ['imports', 'transactions']);
   const stores = readStores(dataDirectory);
   assert.deepEqual(stores.imports, []);
@@ -151,12 +155,15 @@ test('Clear Activity clears transactions and imports while preserving every setu
 test('Reset Financial Data preserves workspaces and restores only authoritative categories', async () => {
   const { dataDirectory, operationsDirectory } = makeDirectories();
   const before = readBytes(dataDirectory);
-  const result = await executeDataReset('reset_financial', true, { dataDirectory, operationsDirectory });
+  const result = await executeDataReset('reset_financial', true, { dataDirectory, operationsDirectory, workspaceId: 'ws1' });
   assert.deepEqual(result.replacedStores, ['categories', 'accounts', 'imports', 'importTemplates', 'budgets', 'rules', 'transactions']);
   const stores = readStores(dataDirectory);
   assert.equal(fs.readFileSync(path.join(dataDirectory, 'workspaces.json')).equals(before.workspaces), true);
   assert.equal(stores.workspaces.length, 2);
-  assertDefaultCategories(stores.categories);
+  assert.equal(stores.categories.length, DEFAULT_SYSTEM_CATEGORIES.length);
+  assert.ok(stores.categories.every((category) => category.workspaceId === 'ws1'));
+  assert.deepEqual(stores.categories.map((category) => category.name), DEFAULT_SYSTEM_CATEGORIES.map((category) => category.name));
+  assert.ok(stores.categories.every((category) => !String(category.id).startsWith('cat_housing')));
   for (const key of ['accounts', 'imports', 'importTemplates', 'budgets', 'rules', 'transactions'] as const) {
     assert.deepEqual(stores[key], []);
   }
@@ -179,7 +186,7 @@ test('explicit confirmation and known operation names are required', async () =>
   const before = readBytes(dataDirectory);
   for (const [operation, confirmed] of [['clear_activity', false], ['unknown', true]] as const) {
     await assert.rejects(
-      () => executeDataReset(operation, confirmed, { dataDirectory, operationsDirectory }),
+      () => executeDataReset(operation, confirmed, { dataDirectory, operationsDirectory, workspaceId: 'ws1' }),
       (error: unknown) => error instanceof RestoreError && error.code === 'INVALID_OPERATION'
     );
   }
@@ -231,7 +238,11 @@ test('rollback failure preserves artifacts and the next recovery restores origin
 test('successful destructive operations remove snapshots, journals, and staged files', async () => {
   for (const operation of ['clear_activity', 'reset_financial', 'factory_reset'] as const) {
     const { dataDirectory, operationsDirectory } = makeDirectories();
-    await executeDataReset(operation, true, { dataDirectory, operationsDirectory });
+    await executeDataReset(operation, true, {
+      dataDirectory,
+      operationsDirectory,
+      ...(operation === 'factory_reset' ? {} : { workspaceId: 'ws1' }),
+    });
     assert.deepEqual(fs.existsSync(operationsDirectory) ? fs.readdirSync(operationsDirectory) : [], []);
     assert.equal(fs.readdirSync(dataDirectory).some((name) => name.includes('.stage') || name.includes('.tmp')), false);
   }
@@ -247,7 +258,7 @@ test('the global lock serializes preview behind a conflicting operation', async 
   await enteredPromise;
 
   let previewResolved = false;
-  const previewPromise = previewDataReset('clear_activity', { dataDirectory, operationsDirectory })
+  const previewPromise = previewDataReset('clear_activity', { dataDirectory, operationsDirectory, workspaceId: 'ws1' })
     .then((preview) => { previewResolved = true; return preview; });
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(previewResolved, false);
@@ -259,7 +270,7 @@ test('the global lock serializes preview behind a conflicting operation', async 
 const apiRequest = (url: string, operation: unknown, confirmed?: boolean) => new Request(url, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ operation, confirmed }),
+  body: JSON.stringify({ operation, confirmed, workspaceId: 'ws1' }),
 });
 
 const withApiDirectories = async <T>(dataDirectory: string, operationsDirectory: string, task: () => Promise<T>) => {
@@ -330,7 +341,11 @@ test('destructive operations pair directly with their canonical backup scopes', 
   } as const;
   for (const operation of Object.keys(expected) as DataResetOperation[]) {
     const { dataDirectory, operationsDirectory } = makeDirectories();
-    const preview = await previewDataReset(operation, { dataDirectory, operationsDirectory });
+    const preview = await previewDataReset(operation, {
+      dataDirectory,
+      operationsDirectory,
+      ...(operation === 'factory_reset' ? {} : { workspaceId: 'ws1' }),
+    });
     assert.equal(preview.backupScope, expected[operation]);
   }
 });

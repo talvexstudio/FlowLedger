@@ -138,7 +138,12 @@ const createFixtureBackup = async (
   const source = path.join(root, 'source');
   const operations = path.join(root, 'source-operations');
   writeStores(source, stores);
-  return createBackup(scope, { dataDirectory: source, operationsDirectory: operations, now: () => new Date(now) });
+  return createBackup(scope, {
+    dataDirectory: source,
+    operationsDirectory: operations,
+    workspaceId: scope === 'everything' ? undefined : 'ws1',
+    now: () => new Date(now),
+  });
 };
 
 const createLegacyFixtureBackup = async (stores = fixtureStores()) => {
