@@ -28,6 +28,11 @@ export default function BudgetPage() {
   const [amountInput, setAmountInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
+  useEffect(() => {
+    setEditModal(null);
+    setAmountInput('');
+  }, [workspaceId]);
+
   const yearOptions = Array.from(new Set([
     selectedYear - 1,
     selectedYear,

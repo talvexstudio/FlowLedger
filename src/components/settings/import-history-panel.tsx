@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Download, FileClock, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -15,6 +15,7 @@ import {
   type ImportHistorySummary,
 } from '@/lib/data-management/import-history-types';
 import { formatCount } from '@/lib/data-management/ui-copy';
+import { isWorkspaceResponseCurrent } from '@/lib/workspace-client-state';
 
 type ApiError = { error?: { code?: string; message?: string } };
 
@@ -40,13 +41,16 @@ export function ImportHistoryPanel({
   const [preview, setPreview] = useState<ImportHistoryPreview | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [executing, setExecuting] = useState(false);
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
 
   const loadImports = useCallback(async () => {
+    setImports([]);
     if (!workspaceId) {
-      setImports([]);
       setLoading(false);
       return;
     }
+    const requestedWorkspaceId = workspaceId;
     setLoading(true);
     try {
       const response = await fetch(
@@ -57,8 +61,9 @@ export function ImportHistoryPanel({
       if (!response.ok || !payload.imports) {
         throw new Error(payload.error?.message ?? 'Import history could not be loaded.');
       }
-      setImports(payload.imports);
+      if (isWorkspaceResponseCurrent(workspaceIdRef.current, requestedWorkspaceId)) setImports(payload.imports);
     } catch (error) {
+      if (!isWorkspaceResponseCurrent(workspaceIdRef.current, requestedWorkspaceId)) return;
       setImports([]);
       toast({
         variant: 'destructive',
@@ -66,7 +71,7 @@ export function ImportHistoryPanel({
         description: error instanceof Error ? error.message : 'Import history could not be loaded.',
       });
     } finally {
-      setLoading(false);
+      if (isWorkspaceResponseCurrent(workspaceIdRef.current, requestedWorkspaceId)) setLoading(false);
     }
   }, [toast, workspaceId]);
 

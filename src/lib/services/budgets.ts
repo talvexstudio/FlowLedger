@@ -2,6 +2,7 @@ import { db } from './firestore';
 import type { Budget, BudgetLine } from '../types';
 import { getCategories } from './categories';
 import { validateCategorySelection } from '../category-ownership';
+import { assertWorkspaceExists } from './workspace-integrity';
 
 const budgetsCollection = (workspaceId: string) =>
   db.collection(`workspaces/${workspaceId}/budgets`);
@@ -96,6 +97,7 @@ export const getBudget = async (
 };
 
 export const ensureBudget = async (workspaceId: string, year: number): Promise<Budget> => {
+  await assertWorkspaceExists(workspaceId);
   return withBudgetCreationLock(workspaceId, year, async () => {
     const existing = await findBudgetDocument(workspaceId, year);
     if (existing) return { id: existing.id, ...existing.data() } as Budget;
@@ -120,6 +122,7 @@ export const saveBudgetLine = async (
   year: number,
   line: Partial<BudgetLine>
 ): Promise<BudgetLine> => {
+  await assertWorkspaceExists(workspaceId);
   validateCategorySelection(
     await getCategories(workspaceId),
     workspaceId,
@@ -152,6 +155,7 @@ export const deleteBudgetLine = async (
   year: number,
   categoryId: string
 ): Promise<void> => {
+  await assertWorkspaceExists(workspaceId);
   const existing = await findBudgetLineDocument(workspaceId, year, categoryId);
   if (existing) {
     await budgetsCollection(workspaceId).doc(existing.id).delete();

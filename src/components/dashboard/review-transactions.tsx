@@ -181,6 +181,12 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
   };
 
   useEffect(() => {
+    setEditingTransaction(null);
+    setBackfillCandidates([]);
+    setPendingRule(null);
+  }, [workspaceId]);
+
+  useEffect(() => {
     if (pendingRule && backfillCandidates.length > 0 && backfillPanelRef.current) {
       const element = backfillPanelRef.current;
       const rect = element.getBoundingClientRect();

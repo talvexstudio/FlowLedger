@@ -15,6 +15,7 @@ import {
   persistWorkspaceId,
   type WorkspaceSelectionStorage,
 } from '@/lib/workspace-selection';
+import { isWorkspaceResponseCurrent } from '@/lib/workspace-client-state';
 
 interface FlowLedgerContextType {
   workspaces: Workspace[];
@@ -47,6 +48,7 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
   const toastRef = useRef(toast);
+  const workspaceIdRef = useRef<string | null>(null);
   toastRef.current = toast;
 
   const getBrowserStorage = (): WorkspaceSelectionStorage | null => {
@@ -61,10 +63,13 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
   const fetchWorkspaces = useCallback(async () => {
     try {
       const data = await apiGetWorkspaces();
+      const selectedWorkspaceId = initializeWorkspaceSelection(data, getBrowserStorage());
       setWorkspaces(data);
-      setWorkspaceIdState(initializeWorkspaceSelection(data, getBrowserStorage()));
+      workspaceIdRef.current = selectedWorkspaceId;
+      setWorkspaceIdState(selectedWorkspaceId);
     } catch (e) {
       setWorkspaces([]);
+      workspaceIdRef.current = null;
       setWorkspaceIdState(null);
       console.error('Failed to load workspaces:', e);
       toastRef.current({ title: 'Failed to load workspaces', description: (e as Error).message, variant: 'destructive' });
@@ -74,7 +79,11 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
   const setWorkspaceId = useCallback((id: string) => {
     if (!workspaces.some((workspace) => workspace.id === id)) return;
     persistWorkspaceId(getBrowserStorage(), id);
+    workspaceIdRef.current = id;
+    setAccounts([]);
+    setTransactions([]);
     setCategories([]);
+    setBudgetLines([]);
     setWorkspaceIdState(id);
   }, [workspaces]);
 
@@ -83,10 +92,12 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
       setAccounts([]);
       return;
     }
+    const requestedWorkspaceId = workspaceId;
     try {
       const data = await apiGetAccounts(workspaceId);
-      setAccounts(data);
+      if (isWorkspaceResponseCurrent(workspaceIdRef.current, requestedWorkspaceId)) setAccounts(data);
     } catch (e) {
+      if (!isWorkspaceResponseCurrent(workspaceIdRef.current, requestedWorkspaceId)) return;
       console.error('Failed to load accounts:', e);
       toastRef.current({ title: 'Failed to load accounts', description: (e as Error).message, variant: 'destructive' });
     }
@@ -97,12 +108,14 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
       setTransactions([]);
       return;
     }
+    const requestedWorkspaceId = workspaceId;
     try {
       const data = await apiGetTransactions(workspaceId);
-      setTransactions(
+      if (isWorkspaceResponseCurrent(workspaceIdRef.current, requestedWorkspaceId)) setTransactions(
         data.map((t) => ({ ...t, date: new Date(t.date), valueDate: t.valueDate ? new Date(t.valueDate) : undefined }))
       );
     } catch (e) {
+      if (!isWorkspaceResponseCurrent(workspaceIdRef.current, requestedWorkspaceId)) return;
       console.error('Failed to load transactions:', e);
       toastRef.current({ title: 'Failed to load transactions', description: (e as Error).message, variant: 'destructive' });
     }
@@ -113,10 +126,12 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
       setCategories([]);
       return;
     }
+    const requestedWorkspaceId = workspaceId;
     try {
       const data = await apiGetCategories(workspaceId);
-      setCategories(data);
+      if (isWorkspaceResponseCurrent(workspaceIdRef.current, requestedWorkspaceId)) setCategories(data);
     } catch (e) {
+      if (!isWorkspaceResponseCurrent(workspaceIdRef.current, requestedWorkspaceId)) return;
       console.error('Failed to load categories:', e);
       toastRef.current({ title: 'Failed to load categories', description: (e as Error).message, variant: 'destructive' });
     }
@@ -129,10 +144,12 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
       setBudgetLines([]);
       return;
     }
+    const requestedWorkspaceId = workspaceId;
     try {
       const { lines } = await apiGetBudget(workspaceId, targetYear);
-      setBudgetLines(lines);
+      if (isWorkspaceResponseCurrent(workspaceIdRef.current, requestedWorkspaceId)) setBudgetLines(lines);
     } catch (e) {
+      if (!isWorkspaceResponseCurrent(workspaceIdRef.current, requestedWorkspaceId)) return;
       console.error('Failed to load budget:', e);
     }
   }, [workspaceId, budgetYear]);

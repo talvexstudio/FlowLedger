@@ -12,6 +12,10 @@ import {
 } from "./transactions";
 import { getAccounts, requireAccount } from './accounts';
 import { normalizeTransactionTypeFields, validateInternalTransfer } from '../internal-transfer';
+import {
+  assertWorkspaceDocumentExists,
+  assertWorkspaceExists,
+} from './workspace-integrity';
 
 const importsCollection = (workspaceId: string) => `workspaces/${workspaceId}/imports`;
 const templatesCollection = (workspaceId: string) => `workspaces/${workspaceId}/importTemplates`;
@@ -20,6 +24,7 @@ export const saveImportSession = async (
   workspaceId: string,
   session: Omit<ImportSession, "id">
 ): Promise<ImportSession> => {
+  await assertWorkspaceExists(workspaceId);
   await requireAccount(workspaceId, session.accountId);
   const payload = { ...session, workspaceId };
   const docRef = await db.collection(importsCollection(workspaceId)).add(payload);
@@ -32,6 +37,12 @@ export const getImportSessions = async (workspaceId: string): Promise<ImportSess
 };
 
 export const deleteImportSession = async (workspaceId: string, importId: string): Promise<void> => {
+  await assertWorkspaceExists(workspaceId);
+  await assertWorkspaceDocumentExists(workspaceId, 'imports', importId, 'Import session');
+  const transactions = await db.collection(`workspaces/${workspaceId}/transactions`).get();
+  if (transactions.docs.some((doc) => doc.data().importId === importId)) {
+    throw new Error('This import session still has transactions and cannot be deleted independently.');
+  }
   await db.collection(importsCollection(workspaceId)).doc(importId).delete();
 };
 
@@ -61,6 +72,7 @@ export const saveImportTemplate = async (
     createdAt?: Date;
   }
 ): Promise<ImportTemplate> => {
+  await assertWorkspaceExists(workspaceId);
   if (data.defaultAccountId) {
     await requireAccount(workspaceId, data.defaultAccountId);
   }
@@ -91,6 +103,7 @@ export const deleteImportTemplate = async (
   workspaceId: string,
   templateId: string
 ): Promise<void> => {
+  await assertWorkspaceExists(workspaceId);
   const existing = await getImportTemplate(workspaceId, templateId);
   if (!existing) throw new Error('Import template not found in the selected workspace.');
   await db.collection(templatesCollection(workspaceId)).doc(templateId).delete();

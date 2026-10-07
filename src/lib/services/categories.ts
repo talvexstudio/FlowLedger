@@ -7,14 +7,9 @@ import {
 } from '../category-ownership';
 import type { Category, Subcategory } from '../types';
 import { db } from './firestore';
+import { assertWorkspaceExists } from './workspace-integrity';
 
 const categoriesCollection = () => db.collection('categories');
-
-const requireWorkspace = async (workspaceId: string) => {
-  if (!workspaceId) throw new Error('workspaceId is required.');
-  const workspace = await db.collection('workspaces').doc(workspaceId).get();
-  if (!workspace.exists) throw new Error('Workspace not found.');
-};
 
 const getPersistedCategories = async (): Promise<PersistedCategory[]> => {
   const snapshot = await categoriesCollection().get();
@@ -22,7 +17,7 @@ const getPersistedCategories = async (): Promise<PersistedCategory[]> => {
 };
 
 export const getCategories = async (workspaceId: string): Promise<RuntimeCategory[]> => {
-  await requireWorkspace(workspaceId);
+  await assertWorkspaceExists(workspaceId);
   const categories = await getPersistedCategories();
   return categories
     .filter((category) => categoryBelongsToWorkspace(category, workspaceId))
@@ -33,7 +28,7 @@ export const getCategory = async (
   workspaceId: string,
   categoryId: string
 ): Promise<RuntimeCategory | null> => {
-  await requireWorkspace(workspaceId);
+  await assertWorkspaceExists(workspaceId);
   const category = (await getPersistedCategories()).find((candidate) => candidate.id === categoryId);
   if (!category || !categoryBelongsToWorkspace(category, workspaceId)) return null;
   return normalizeRuntimeCategory(category);
@@ -63,7 +58,7 @@ export const saveCategory = async (
   workspaceId: string,
   category: CategoryWrite
 ): Promise<RuntimeCategory> => {
-  await requireWorkspace(workspaceId);
+  await assertWorkspaceExists(workspaceId);
   if (category.workspaceId && category.workspaceId !== workspaceId) {
     throw new Error('Category does not belong to the selected workspace.');
   }

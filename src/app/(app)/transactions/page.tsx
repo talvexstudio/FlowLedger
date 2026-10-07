@@ -139,6 +139,13 @@ export default function TransactionsPage() {
     };
 
     useEffect(() => {
+        setSheetState({ open: false, transaction: null });
+        setDeleteState({ open: false, transaction: null });
+        setBackfillCandidates([]);
+        setPendingRule(null);
+    }, [workspaceId]);
+
+    useEffect(() => {
         if (pendingRule && backfillCandidates.length > 0 && backfillPanelRef.current) {
             const element = backfillPanelRef.current;
             const rect = element.getBoundingClientRect();

@@ -120,16 +120,21 @@ export default function ImportPage() {
   );
 
   React.useEffect(() => {
+    let cancelled = false;
+    setTemplates([]);
+    setSelectedTemplateId('generic');
+    setTargetAccountId('');
     const loadTemplates = async () => {
       if (!workspaceId) return;
       try {
         const tpl = await apiGetImportTemplates(workspaceId);
-        setTemplates(tpl);
+        if (!cancelled) setTemplates(tpl);
       } catch (error) {
-        console.error(error);
+        if (!cancelled) console.error(error);
       }
     };
-    loadTemplates();
+    void loadTemplates();
+    return () => { cancelled = true; };
   }, [workspaceId]);
 
   React.useEffect(() => {

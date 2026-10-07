@@ -5,29 +5,21 @@ import { getCategories } from './categories';
 import { validateCategorySelection } from '../category-ownership';
 import { normalizeTransactionTypeFields, validateInternalTransfer } from '../internal-transfer';
 import { findPotentialTransfers } from '../utils/duplicate-utils';
+import {
+    assertWorkspaceDocumentExists,
+    assertWorkspaceExists,
+} from './workspace-integrity';
 
 const transactionsCollection = (workspaceId: string) => `workspaces/${workspaceId}/transactions`;
 
 const amountToCents = (amount: number) => Math.round(amount * 100);
 const directionForAmount = (amount: number): 'Out' | 'In' => amount < 0 ? 'Out' : 'In';
 
-const assertDocumentExistsInWorkspace = async (
-    workspaceId: string,
-    collectionName: 'imports' | 'transactions',
-    id: string,
-    label: string
-) => {
-    const snapshot = await db
-        .collection(`workspaces/${workspaceId}/${collectionName}`)
-        .doc(id)
-        .get();
-    if (!snapshot.exists) throw new Error(`${label} not found in the selected workspace.`);
-};
-
 const validateTransactionWorkspaceReferences = async (
     workspaceId: string,
     transaction: Partial<Transaction>
 ) => {
+    await assertWorkspaceExists(workspaceId);
     const accounts = await getAccounts(workspaceId);
     const accountIds = new Set(accounts.map((account) => account.id));
     if (!transaction.accountId || !accountIds.has(transaction.accountId)) {
@@ -40,7 +32,7 @@ const validateTransactionWorkspaceReferences = async (
         throw new Error('Counterpart account not found in the selected workspace.');
     }
     if (transaction.importId) {
-        await assertDocumentExistsInWorkspace(
+        await assertWorkspaceDocumentExists(
             workspaceId,
             'imports',
             transaction.importId,
@@ -51,7 +43,7 @@ const validateTransactionWorkspaceReferences = async (
         if (transaction.id && transaction.linkedTransactionId === transaction.id) {
             throw new Error('A transaction cannot link to itself.');
         }
-        await assertDocumentExistsInWorkspace(
+        await assertWorkspaceDocumentExists(
             workspaceId,
             'transactions',
             transaction.linkedTransactionId,
@@ -179,7 +171,16 @@ export const getTransaction = async (
     return transactions.find(transaction => transaction.id === transactionId) ?? null;
 }
 
-export const saveTransaction = async (workspaceId: string, transactionData: Partial<Transaction>) => {
+type TransactionWriteOptions = {
+    allowProvisionalTransferLink?: boolean;
+};
+
+export const saveTransaction = async (
+    workspaceId: string,
+    transactionData: Partial<Transaction>,
+    options: TransactionWriteOptions = {}
+) => {
+    await assertWorkspaceExists(workspaceId);
     const coll = db.collection(transactionsCollection(workspaceId));
     if (transactionData.id) {
         const currentSnapshot = await coll.doc(transactionData.id).get();
@@ -201,6 +202,15 @@ export const saveTransaction = async (workspaceId: string, transactionData: Part
         merged = await enforceInternalTransferReview(workspaceId, merged);
         const normalizedData = normalizeAmountBase(merged);
         await validateTransactionWorkspaceReferences(workspaceId, normalizedData);
+        if (
+            normalizedData.linkedTransactionId &&
+            !current?.linkedTransactionId &&
+            !options.allowProvisionalTransferLink
+        ) {
+            throw new TransferResolutionError(
+                'Use the dedicated transfer-pair operation to create a reciprocal link.'
+            );
+        }
         const { id, ...data } = normalizedData;
         await coll.doc(transactionData.id).set({
             ...data,
@@ -216,6 +226,11 @@ export const saveTransaction = async (workspaceId: string, transactionData: Part
             await enforceInternalTransferReview(workspaceId, normalizedFields)
         );
         await validateTransactionWorkspaceReferences(workspaceId, normalizedData);
+        if (normalizedData.linkedTransactionId && !options.allowProvisionalTransferLink) {
+            throw new TransferResolutionError(
+                'Use the dedicated transfer-pair operation to create a reciprocal link.'
+            );
+        }
         const docRef = await coll.add({
             ...normalizedData,
             createdAt: new Date(),
@@ -228,15 +243,16 @@ export const saveTransaction = async (workspaceId: string, transactionData: Part
 
 export type InternalTransferPairDependencies = {
     getAccounts: (workspaceId: string) => Promise<Account[]>;
-    saveTransaction: typeof saveTransaction;
+    saveTransaction: (workspaceId: string, transaction: Partial<Transaction>) => ReturnType<typeof saveTransaction>;
     linkSource: (workspaceId: string, sourceId: string, destinationId: string) => Promise<void>;
 };
 
 const defaultInternalTransferPairDependencies: InternalTransferPairDependencies = {
     getAccounts,
-    saveTransaction,
+    saveTransaction: (workspaceId, transaction) =>
+        saveTransaction(workspaceId, transaction, { allowProvisionalTransferLink: true }),
     linkSource: async (workspaceId, sourceId, destinationId) => {
-        await assertDocumentExistsInWorkspace(
+        await assertWorkspaceDocumentExists(
             workspaceId,
             'transactions',
             destinationId,
@@ -250,6 +266,7 @@ const defaultInternalTransferPairDependencies: InternalTransferPairDependencies 
 };
 
 export const confirmTransaction = async (workspaceId: string, transactionId: string) => {
+    await assertWorkspaceExists(workspaceId);
     const transaction = await getTransaction(workspaceId, transactionId);
     if (!transaction) throw new Error('Transaction not found');
     if (transaction.type === 'InternalTransfer') {
@@ -261,6 +278,7 @@ export const confirmTransaction = async (workspaceId: string, transactionId: str
 }
 
 export const deleteTransaction = async (workspaceId: string, transactionId: string) => {
+    await assertWorkspaceExists(workspaceId);
     const transaction = await getTransaction(workspaceId, transactionId);
     assertTransactionDeletionAllowed(transaction);
     await db.collection(transactionsCollection(workspaceId)).doc(transactionId).delete();
@@ -317,8 +335,19 @@ export const deleteTransactionsByImport = async (
     workspaceId: string,
     importId: string
 ): Promise<void> => {
+    await assertWorkspaceExists(workspaceId);
+    await assertWorkspaceDocumentExists(workspaceId, 'imports', importId, 'Import session');
     const coll = db.collection(transactionsCollection(workspaceId));
     const snapshot = await coll.where("importId", "==", importId).get();
+    const selectedIds = new Set(snapshot.docs.map((doc) => doc.id));
+    for (const doc of snapshot.docs) {
+        const linkedTransactionId = doc.data().linkedTransactionId;
+        if (linkedTransactionId && !selectedIds.has(linkedTransactionId)) {
+            throw new TransferResolutionError(
+                'The import contains one leg of a linked transfer. Delete it through Import History with both legs in scope.'
+            );
+        }
+    }
     for (const doc of snapshot.docs) {
         await coll.doc(doc.id).delete();
     }
@@ -350,7 +379,11 @@ const defaultTransferResolutionDependencies: TransferResolutionDependencies = {
     getAccounts,
     writeTransaction: writeTransactionRecord,
     createTransaction: async (workspaceId, transaction) =>
-        await saveTransaction(workspaceId, transaction) as Transaction,
+        await saveTransaction(
+            workspaceId,
+            transaction,
+            { allowProvisionalTransferLink: true }
+        ) as Transaction,
     deleteCreatedTransaction: async (workspaceId, transactionId) => {
         await db.collection(transactionsCollection(workspaceId)).doc(transactionId).delete();
     },

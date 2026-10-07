@@ -108,15 +108,32 @@ const requireReference = (
   }
 };
 
+const requireRequiredReference = (
+  collection: Map<string, BackupRecord>,
+  id: string | undefined,
+  message: string
+) => {
+  if (!id || !collection.has(id)) {
+    throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', message);
+  }
+};
+
 const validateCategoryReference = (
   record: BackupRecord,
   label: string,
   categories: Map<string, BackupRecord>,
   subcategoryParents: Map<string, { categoryId: string; workspaceId: string }>,
-  workspaceId: string | undefined
+  workspaceId: string | undefined,
+  categoryRequired = false
 ) => {
   const categoryId = optionalString(record, 'categoryId');
   const subcategoryId = optionalString(record, 'subcategoryId');
+  if (categoryRequired && !categoryId) {
+    throw new RestoreError(
+      'REFERENTIAL_INTEGRITY_FAILURE',
+      `${label} references a missing category.`
+    );
+  }
   requireReference(categories, categoryId, `${label} references a missing category.`);
   if (categoryId && effectiveCategoryWorkspaceId(categories.get(categoryId)!) !== workspaceId) {
     throw new RestoreError(
@@ -160,6 +177,10 @@ const validateLinkedPair = (
       (source.internalDirection === 'Out' && counterpart.internalDirection === 'In') ||
       (source.internalDirection === 'In' && counterpart.internalDirection === 'Out')
     ) ||
+    (source.internalDirection === 'Out' && Number(source.amountBase) >= 0) ||
+    (source.internalDirection === 'In' && Number(source.amountBase) <= 0) ||
+    (counterpart.internalDirection === 'Out' && Number(counterpart.amountBase) >= 0) ||
+    (counterpart.internalDirection === 'In' && Number(counterpart.amountBase) <= 0) ||
     Math.round(Number(source.amountBase) * 100) + Math.round(Number(counterpart.amountBase) * 100) !== 0
   ) {
     throw new RestoreError(
@@ -213,14 +234,14 @@ export const validateRestoreReferences = (
   }
 
   for (const account of accounts.values()) {
-    requireReference(workspaces, optionalString(account, 'workspaceId'), 'An account references a missing workspace.');
+    requireRequiredReference(workspaces, optionalString(account, 'workspaceId'), 'An account references a missing workspace.');
   }
 
   for (const importSession of imports.values()) {
     const workspaceId = optionalString(importSession, 'workspaceId');
     const accountId = optionalString(importSession, 'accountId');
-    requireReference(workspaces, workspaceId, 'An import references a missing workspace.');
-    requireReference(accounts, accountId, 'An import references a missing account.');
+    requireRequiredReference(workspaces, workspaceId, 'An import references a missing workspace.');
+    requireRequiredReference(accounts, accountId, 'An import references a missing account.');
     if (accountId && accounts.get(accountId)?.workspaceId !== workspaceId) {
       throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'An import account belongs to a different workspace.');
     }
@@ -229,7 +250,7 @@ export const validateRestoreReferences = (
   for (const template of data.importTemplates) {
     const workspaceId = optionalString(template, 'workspaceId');
     const accountId = optionalString(template, 'defaultAccountId');
-    requireReference(workspaces, workspaceId, 'An import template references a missing workspace.');
+    requireRequiredReference(workspaces, workspaceId, 'An import template references a missing workspace.');
     requireReference(accounts, accountId, 'An import template references a missing default account.');
     if (accountId && accounts.get(accountId)?.workspaceId !== workspaceId) {
       throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'An import template account belongs to a different workspace.');
@@ -238,7 +259,7 @@ export const validateRestoreReferences = (
 
   for (const rule of data.rules) {
     const workspaceId = optionalString(rule, 'workspaceId');
-    requireReference(workspaces, workspaceId, 'A rule references a missing workspace.');
+    requireRequiredReference(workspaces, workspaceId, 'A rule references a missing workspace.');
     const match = rule.match as BackupRecord;
     const action = rule.action as BackupRecord;
     const accountId = optionalString(match, 'accountId');
@@ -257,14 +278,17 @@ export const validateRestoreReferences = (
   const budgetYears = new Set<string>();
   for (const budget of budgets.values()) {
     const workspaceId = optionalString(budget, 'workspaceId');
-    requireReference(workspaces, workspaceId, 'A budget references a missing workspace.');
+    requireRequiredReference(workspaces, workspaceId, 'A budget references a missing workspace.');
     if (budget.recordType === 'line') {
       const headerId = optionalString(budget, 'budgetId');
-      requireReference(budgetHeaders, headerId, 'A budget line references a missing budget header.');
+      requireRequiredReference(budgetHeaders, headerId, 'A budget line references a missing budget header.');
       if (headerId && budgetHeaders.get(headerId)?.workspaceId !== workspaceId) {
         throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'A budget line belongs to a different workspace than its header.');
       }
-      validateCategoryReference(budget, 'A budget line', categories, subcategoryParents, workspaceId);
+      if (headerId && budgetHeaders.get(headerId)?.year !== budget.year) {
+        throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'A budget line year does not match its budget header.');
+      }
+      validateCategoryReference(budget, 'A budget line', categories, subcategoryParents, workspaceId, true);
     } else {
       const budgetYearKey = `${workspaceId ?? ''}:${String(budget.year)}`;
       if (budgetYears.has(budgetYearKey)) {
@@ -285,8 +309,8 @@ export const validateRestoreReferences = (
     const importId = optionalString(transaction, 'importId');
     const linkedTransactionId = optionalString(transaction, 'linkedTransactionId');
 
-    requireReference(workspaces, workspaceId, 'A transaction references a missing workspace.');
-    requireReference(accounts, accountId, 'A transaction references a missing account.');
+    requireRequiredReference(workspaces, workspaceId, 'A transaction references a missing workspace.');
+    requireRequiredReference(accounts, accountId, 'A transaction references a missing account.');
     requireReference(accounts, destinationAccountId, 'A transaction references a missing counterpart account.');
     requireReference(imports, importId, 'A transaction references a missing import session.');
     requireReference(transactions, linkedTransactionId, 'A transaction references a missing linked transaction.');

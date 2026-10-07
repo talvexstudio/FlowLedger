@@ -44,6 +44,12 @@ export function CategoriesPanel() {
     setEditableCategories(normalizeCategories(categories as EditableCategory[]));
   }, [categories]);
 
+  React.useEffect(() => {
+    setExpandedCategoryIds(new Set());
+    setShowAddForm(false);
+    setNewCategoryName('');
+  }, [workspaceId]);
+
   const updateCategory = (categoryId: string, updater: (cat: EditableCategory) => EditableCategory) => {
     setEditableCategories(prev =>
       prev.map(cat => (cat.id === categoryId ? updater(cat) : cat))

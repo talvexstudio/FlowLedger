@@ -5,7 +5,6 @@ import {
   createInternalTransferPair,
   confirmTransaction,
   deleteTransaction,
-  deleteTransactionsByImport,
   getTransaction,
   findTransferCounterpartCandidates,
   linkExistingTransferPair,
@@ -236,7 +235,10 @@ export async function DELETE(req: NextRequest) {
     if (!workspaceId) return NextResponse.json({ error: 'workspaceId required' }, { status: 400 });
 
     if (importId) {
-      await deleteTransactionsByImport(workspaceId, importId);
+      return NextResponse.json(
+        { error: 'Delete imported transactions through Import History so the operation is atomic and pair-safe.' },
+        { status: 409 }
+      );
     } else if (id) {
       await deleteTransaction(workspaceId, id);
     } else {
