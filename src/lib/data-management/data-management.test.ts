@@ -173,12 +173,12 @@ test('invalid top-level shape and missing required record fields fail backup exp
   const shapeDirectory = makeTempDirectory();
   writeFixtureStores(shapeDirectory);
   fs.writeFileSync(path.join(shapeDirectory, 'accounts.json'), '{}', 'utf-8');
-  await assert.rejects(createBackup('financial_data', { dataDirectory: shapeDirectory }), /accounts\.json/);
+  await assert.rejects(createBackup('financial_data', { dataDirectory: shapeDirectory, workspaceId: 'ws1' }), /accounts\.json/);
 
   const recordDirectory = makeTempDirectory();
   writeFixtureStores(recordDirectory);
   fs.writeFileSync(path.join(recordDirectory, 'accounts.json'), JSON.stringify([{ id: 'broken' }]), 'utf-8');
-  await assert.rejects(createBackup('financial_data', { dataDirectory: recordDirectory }), /accounts\.json/);
+  await assert.rejects(createBackup('financial_data', { dataDirectory: recordDirectory, workspaceId: 'ws1' }), /accounts/);
 });
 
 test('unknown backup scope is rejected', async () => {
@@ -257,7 +257,7 @@ test('backup read waits for and captures one coherent locked snapshot', async ()
     writeFixtureStores(directory, stores);
   });
   await started;
-  const backupPromise = createBackup('financial_data', { dataDirectory: directory, now: () => new Date(now) });
+  const backupPromise = createBackup('financial_data', { dataDirectory: directory, workspaceId: 'ws1', now: () => new Date(now) });
   const [, backup] = await Promise.all([writer, backupPromise]);
   assert.equal(backup.data.accounts?.[0].name, 'Updated account');
   assert.equal(
@@ -266,8 +266,8 @@ test('backup read waits for and captures one coherent locked snapshot', async ()
   );
 });
 
-test('authoritative defaults contain ws1 and the complete system-only taxonomy', () => {
-  assert.equal(DEFAULT_DATA_VERSION, 1);
+test('authoritative defaults contain ws1 and its complete editable starter taxonomy', () => {
+  assert.equal(DEFAULT_DATA_VERSION, 2);
   assert.equal(DEFAULT_WORKSPACES.length, 1);
   assert.equal(DEFAULT_WORKSPACES[0].id, 'ws1');
   assert.equal(DEFAULT_SYSTEM_CATEGORIES.length, 17);
@@ -275,6 +275,8 @@ test('authoritative defaults contain ws1 and the complete system-only taxonomy',
   assert.equal(subcategories.length, 60);
   assert.ok(DEFAULT_SYSTEM_CATEGORIES.every((category) => category.isSystem === true));
   assert.ok(subcategories.every((subcategory) => subcategory.isSystem === true));
+  assert.ok(DEFAULT_SYSTEM_CATEGORIES.every((category) => category.workspaceId === 'ws1'));
+  assert.ok(subcategories.every((subcategory) => subcategory.workspaceId === 'ws1'));
   assert.equal(DEFAULT_SYSTEM_CATEGORIES.some((category) => category.isCustom === true), false);
   assert.equal(subcategories.some((subcategory) => subcategory.isCustom === true), false);
 });
@@ -289,7 +291,7 @@ test('backup API returns downloadable JSON and writes no backup artifact under d
     const response = await backupPost(new Request('http://localhost/api/data-management/backup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope: 'activity' }),
+      body: JSON.stringify({ scope: 'activity', workspaceId: 'ws1' }),
     }));
     assert.equal(response.status, 200);
     assert.match(response.headers.get('Content-Type') ?? '', /^application\/json/);
@@ -331,7 +333,11 @@ test('all three new scopes emit matching counts and checksums for exactly their 
   const directory = makeTempDirectory();
   writeFixtureStores(directory);
   for (const scope of ['activity', 'financial_data', 'everything'] as const) {
-    const backup = await createBackup(scope, { dataDirectory: directory, now: () => new Date(now) });
+    const backup = await createBackup(scope, {
+      dataDirectory: directory,
+      workspaceId: scope === 'everything' ? undefined : 'ws1',
+      now: () => new Date(now),
+    });
     assert.deepEqual(backup.includedStores, [...BACKUP_SCOPE_STORES[scope]]);
     assert.deepEqual(Object.keys(backup.data), [...BACKUP_SCOPE_STORES[scope]]);
     for (const entry of backup.storeManifest) {

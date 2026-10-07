@@ -31,6 +31,11 @@ export default function AccountsPage() {
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
 
+  React.useEffect(() => {
+    setIsSheetOpen(false);
+    setEditingAccount(null);
+  }, [workspaceId]);
+
   const handleAddAccount = useCallback(() => {
     setEditingAccount(null);
     setIsSheetOpen(true);

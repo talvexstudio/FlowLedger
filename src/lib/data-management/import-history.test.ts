@@ -402,9 +402,12 @@ test('API rejects removed actions, enforces confirmation, and applies a confirme
 test('Activity backup/restore and every reset operation remain compatible', async () => {
   for (const operation of ['clear_activity', 'reset_financial', 'factory_reset'] as const) {
     const paths = makeDirectories();
-    const backup = await createBackup('activity', { ...paths, now: () => new Date(now) });
+    const backup = await createBackup('activity', { ...paths, workspaceId: 'ws1', now: () => new Date(now) });
     assert.deepEqual(backup.includedStores, ['imports', 'transactions']);
-    await executeDataReset(operation, true, paths);
+    await executeDataReset(operation, true, {
+      ...paths,
+      ...(operation === 'factory_reset' ? {} : { workspaceId: 'ws1' }),
+    });
     if (operation === 'clear_activity') {
       await restoreBackup(JSON.stringify(backup), paths);
       const restored = readStores(paths.dataDirectory);

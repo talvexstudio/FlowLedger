@@ -8,6 +8,8 @@ export type RestoreErrorCode =
   | 'RESTORE_EXECUTION_FAILURE'
   | 'INVALID_OPERATION'
   | 'DATA_OPERATION_FAILURE'
+  | 'SOURCE_WORKSPACE_MISSING'
+  | 'WORKSPACE_ID_CONFLICT'
   | 'ROLLBACK_FAILURE';
 
 export class RestoreError extends Error {

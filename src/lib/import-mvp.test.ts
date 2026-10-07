@@ -39,6 +39,7 @@ const accountId = 'acc-target';
 const categories: (Category & { subcategories: Subcategory[] })[] = [
   {
     id: 'cat-expense',
+    workspaceId,
     name: 'Food',
     type: 'expense',
     order: 1,
@@ -46,6 +47,7 @@ const categories: (Category & { subcategories: Subcategory[] })[] = [
     subcategories: [
       {
         id: 'sub-coffee',
+        workspaceId,
         categoryId: 'cat-expense',
         name: 'Coffee',
         order: 1,
@@ -56,6 +58,7 @@ const categories: (Category & { subcategories: Subcategory[] })[] = [
   },
   {
     id: 'cat-income',
+    workspaceId,
     name: 'Income',
     type: 'income',
     order: 2,
@@ -63,6 +66,7 @@ const categories: (Category & { subcategories: Subcategory[] })[] = [
     subcategories: [
       {
         id: 'sub-salary',
+        workspaceId,
         categoryId: 'cat-income',
         name: 'Salary',
         order: 1,

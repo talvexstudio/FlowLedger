@@ -14,6 +14,10 @@ import type { DataResetOperation, DataResetPreview } from '@/lib/data-management
 import {
   CLEAR_RESET_SECTION_DESCRIPTION,
   CLEAR_RESET_SECTION_TITLE,
+  backupScopeDescription,
+  canUseBackupScope,
+  canUseDataReset,
+  dataResetTargetLabel,
   formatCount,
   RESET_OPTIONS,
 } from '@/lib/data-management/ui-copy';
@@ -24,16 +28,11 @@ import {
   type BackupScope,
   type PersistedStoreKey,
 } from '@/lib/data-management/store-manifest';
+import { useFlowLedger } from '@/hooks/use-flow-ledger';
+import { persistWorkspaceId } from '@/lib/workspace-selection';
+import { downloadBackup } from '@/lib/data-management/backup-download';
 
 type RestoreApiError = { error?: { code?: string; message?: string } };
-
-const fallbackFilename = (scope: BackupScope) =>
-  `flowledger-backup-${scope.replace(/_/g, '-')}.json`;
-
-const responseFilename = (header: string | null, scope: BackupScope) => {
-  const match = header?.match(/filename="?([^";]+)"?/i);
-  return match?.[1] ?? fallbackFilename(scope);
-};
 
 const STORE_LABELS: Record<PersistedStoreKey, string> = {
   workspaces: 'Workspaces',
@@ -53,36 +52,24 @@ export function DataStoragePanel() {
   const [preview, setPreview] = useState<RestorePreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [recreatedWorkspaceName, setRecreatedWorkspaceName] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const [resetPreview, setResetPreview] = useState<DataResetPreview | null>(null);
   const [resetPreviewing, setResetPreviewing] = useState<DataResetOperation | null>(null);
   const [resetConfirmed, setResetConfirmed] = useState(false);
   const [resetting, setResetting] = useState(false);
   const { toast } = useToast();
+  const { workspaceId, workspaces } = useFlowLedger();
+  const selectedWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
 
   const exportBackup = async (backupScope: BackupScope) => {
+    if (backupScope !== 'everything' && !workspaceId) {
+      toast({ variant: 'destructive', title: 'Select a workspace', description: 'Choose a workspace before exporting this backup.' });
+      return;
+    }
     setExporting(true);
     try {
-      const response = await fetch('/api/data-management/backup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope: backupScope }),
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null) as { error?: string } | null;
-        throw new Error(payload?.error ?? 'Could not export the backup.');
-      }
-
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = responseFilename(response.headers.get('Content-Disposition'), backupScope);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      await downloadBackup(backupScope, workspaceId);
 
       toast({ title: 'Backup exported', description: 'The backup was downloaded to your device.' });
     } catch (error) {
@@ -101,6 +88,7 @@ export function DataStoragePanel() {
     setRestoreFile(file);
     setPreview(null);
     setConfirmed(false);
+    setRecreatedWorkspaceName('');
     if (!file) return;
 
     setPreviewing(true);
@@ -116,6 +104,7 @@ export function DataStoragePanel() {
         throw new Error(payload.error?.message ?? 'The backup could not be validated.');
       }
       setPreview(payload.preview);
+      setRecreatedWorkspaceName(payload.preview.sourceWorkspaceName ?? '');
       toast({ title: 'Backup validated', description: 'Review the replacement impact before restoring.' });
     } catch (error) {
       setRestoreFile(null);
@@ -131,11 +120,16 @@ export function DataStoragePanel() {
 
   const replaceCurrentData = async () => {
     if (!restoreFile || !preview || !confirmed) return;
+    if (preview.workspaceStatus === 'missing' && !preview.canRecreateWorkspace) return;
     setRestoring(true);
     try {
       const formData = new FormData();
       formData.append('file', restoreFile);
       formData.append('confirmReplaceAll', 'true');
+      if (preview.workspaceStatus === 'missing') {
+        formData.append('recreateMissingWorkspace', 'true');
+        formData.append('recreatedWorkspaceName', recreatedWorkspaceName);
+      }
       const response = await fetch('/api/data-management/restore', {
         method: 'POST',
         body: formData,
@@ -148,6 +142,9 @@ export function DataStoragePanel() {
         title: 'Restore complete',
         description: payload.result.cleanupWarning ?? 'FlowLedger data was replaced successfully.',
       });
+      if (preview.sourceWorkspaceId) {
+        persistWorkspaceId(window.localStorage, preview.sourceWorkspaceId);
+      }
       window.location.reload();
     } catch (error) {
       toast({
@@ -167,7 +164,10 @@ export function DataStoragePanel() {
       const response = await fetch('/api/data-management/reset/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ operation }),
+        body: JSON.stringify({
+          operation,
+          ...(operation !== 'factory_reset' ? { workspaceId } : {}),
+        }),
       });
       const payload = await response.json() as { preview?: DataResetPreview } & RestoreApiError;
       if (!response.ok || !payload.preview) {
@@ -192,7 +192,11 @@ export function DataStoragePanel() {
       const response = await fetch('/api/data-management/reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ operation: resetPreview.operation, confirmed: true }),
+        body: JSON.stringify({
+          operation: resetPreview.operation,
+          confirmed: true,
+          ...(resetPreview.operation !== 'factory_reset' ? { workspaceId: resetPreview.workspaceId } : {}),
+        }),
       });
       const payload = await response.json() as { result?: { cleanupWarning?: string } } & RestoreApiError;
       if (!response.ok || !payload.result) {
@@ -230,10 +234,17 @@ export function DataStoragePanel() {
               const definition = DATA_SCOPE_DEFINITIONS[backupScope];
               return (
                 <div key={backupScope} className="flex items-start gap-3 rounded-md border p-4">
-                  <RadioGroupItem value={backupScope} id={`backup-${backupScope}`} className="mt-0.5" />
+                  <RadioGroupItem
+                    value={backupScope}
+                    id={`backup-${backupScope}`}
+                    className="mt-0.5"
+                    disabled={!canUseBackupScope(backupScope, workspaceId)}
+                  />
                   <Label htmlFor={`backup-${backupScope}`} className="cursor-pointer space-y-1 font-normal">
                     <span className="block font-medium">{definition.label}</span>
-                    <span className="block text-sm text-muted-foreground">{definition.description}</span>
+                    <span className="block text-sm text-muted-foreground">
+                      {backupScopeDescription(backupScope, selectedWorkspace?.name)}
+                    </span>
                   </Label>
                 </div>
               );
@@ -244,7 +255,7 @@ export function DataStoragePanel() {
             Backups contain sensitive financial information and remain on your device unless you move or upload them.
           </p>
 
-          <Button onClick={() => exportBackup(scope)} disabled={exporting || restoring || resetting}>
+          <Button onClick={() => exportBackup(scope)} disabled={exporting || restoring || resetting || !canUseBackupScope(scope, workspaceId)}>
             {exporting ? <Loader2 className="animate-spin" /> : <Download />}
             {exporting ? 'Exporting...' : 'Export backup'}
           </Button>
@@ -256,7 +267,7 @@ export function DataStoragePanel() {
           <div>
             <h3 className="font-medium">Restore backup</h3>
             <p className="text-sm text-muted-foreground">
-              Validate a backup, review its impact, then replace all current data.
+              Validate a backup, review its scope, then restore the included data.
             </p>
           </div>
 
@@ -281,6 +292,13 @@ export function DataStoragePanel() {
                 <div><span className="text-muted-foreground">Scope</span><p className="font-medium">{preview.scopeLabel}</p></div>
               </div>
 
+              {preview.sourceWorkspaceName && (
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Workspace</span>
+                  <p className="font-medium">{preview.sourceWorkspaceName}</p>
+                </div>
+              )}
+
               <div>
                 <h4 className="mb-2 text-sm font-medium">Backup contents</h4>
                 <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
@@ -295,21 +313,23 @@ export function DataStoragePanel() {
               <div className="rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm">
                 <div className="mb-2 flex items-center gap-2 font-medium text-destructive">
                   <AlertTriangle className="h-4 w-4" />
-                  {preview.scope === 'activity' && 'Restore Activity'}
-                  {preview.scope === 'financial_data' && 'Restore Financial Data'}
-                  {preview.scope === 'everything' && 'Restore Everything'}
-                  {preview.scope === 'financial_activity' && 'Restore legacy backup'}
+                  {preview.isLegacy && 'Restore legacy backup'}
+                  {!preview.isLegacy && preview.scope === 'activity' && 'Restore Activity'}
+                  {!preview.isLegacy && preview.scope === 'financial_data' && 'Restore Financial Data'}
+                  {!preview.isLegacy && preview.scope === 'everything' && 'Restore Everything'}
                 </div>
-                {preview.scope === 'activity' && (
+                {preview.scope === 'activity' && !preview.isLegacy && (
                   <div className="space-y-2">
-                    <p>Transactions and import history will be replaced.</p>
-                    <p>Accounts, categories, import templates, budgets, rules, and workspaces will be preserved.</p>
+                    <p>{preview.sourceWorkspaceName} transactions and import history will be replaced.</p>
+                    <p>Other {preview.sourceWorkspaceName} setup will be preserved.</p>
+                    <p>Other workspaces will not be affected.</p>
                   </div>
                 )}
-                {preview.scope === 'financial_data' && (
+                {preview.scope === 'financial_data' && !preview.isLegacy && (
                   <div className="space-y-2">
-                    <p>Financial data and configuration will be replaced.</p>
-                    <p>Workspaces will be preserved.</p>
+                    <p>{preview.sourceWorkspaceName} financial data and configuration will be replaced.</p>
+                    <p>Workspace identity will be preserved.</p>
+                    <p>Other workspaces will not be affected.</p>
                   </div>
                 )}
                 {preview.scope === 'everything' && <p>All FlowLedger persisted data will be replaced.</p>}
@@ -319,7 +339,37 @@ export function DataStoragePanel() {
                     <p>Import templates, budgets, and rules will be cleared.</p>
                   </div>
                 )}
+                {preview.isLegacy && preview.scope !== 'financial_activity' && (
+                  <div className="space-y-2">
+                    <p>This pre-workspace backup retains its original global replacement behavior.</p>
+                    <p>All records in its included stores will be replaced across the installation.</p>
+                  </div>
+                )}
               </div>
+
+              {preview.workspaceStatus === 'missing' && (
+                <div className="space-y-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
+                  <p className="font-medium">Workspace “{preview.sourceWorkspaceName}” no longer exists.</p>
+                  {preview.canRecreateWorkspace ? (
+                    <>
+                      <p>Create the original workspace identity from this backup, then restore its data.</p>
+                      <div className="space-y-2">
+                        <Label htmlFor="recreated-workspace-name">Workspace name</Label>
+                        <input
+                          id="recreated-workspace-name"
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={recreatedWorkspaceName}
+                          onChange={(event) => setRecreatedWorkspaceName(event.target.value)}
+                          maxLength={80}
+                          disabled={restoring}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <p>{preview.recreationBlockReason ?? 'This backup does not contain enough data to recreate the workspace safely.'}</p>
+                  )}
+                </div>
+              )}
 
               <Button
                 type="button"
@@ -330,7 +380,7 @@ export function DataStoragePanel() {
                 <Download /> Export Everything backup first
               </Button>
 
-              <div className="flex items-start gap-3">
+              {(preview.workspaceStatus !== 'missing' || preview.canRecreateWorkspace) && <div className="flex items-start gap-3">
                 <Checkbox
                   id="confirm-restore"
                   checked={confirmed}
@@ -338,21 +388,25 @@ export function DataStoragePanel() {
                   disabled={restoring}
                 />
                 <Label htmlFor="confirm-restore" className="font-normal leading-5">
-                  {preview.scope === 'activity' && 'I understand that the current Activity data will be replaced and cannot be merged.'}
-                  {preview.scope === 'financial_data' && 'I understand that the current Financial Data will be replaced and cannot be merged.'}
-                  {preview.scope === 'everything' && 'I understand that all current FlowLedger data will be replaced and cannot be merged.'}
-                  {preview.scope === 'financial_activity' && "I understand that the legacy backup's defined data scope will be replaced and cannot be merged."}
+                  {preview.isLegacy && "I understand that the legacy backup's defined global data scope will be replaced and cannot be merged."}
+                  {!preview.isLegacy && preview.scope === 'activity' && 'I understand that the source workspace Activity data will be replaced and cannot be merged.'}
+                  {!preview.isLegacy && preview.scope === 'financial_data' && 'I understand that the source workspace Financial Data will be replaced and cannot be merged.'}
+                  {!preview.isLegacy && preview.scope === 'everything' && 'I understand that all current FlowLedger data will be replaced and cannot be merged.'}
                 </Label>
-              </div>
+              </div>}
 
-              <Button
+              {(preview.workspaceStatus !== 'missing' || preview.canRecreateWorkspace) && <Button
                 variant="destructive"
                 onClick={replaceCurrentData}
-                disabled={!confirmed || restoring || exporting}
+                disabled={!confirmed || restoring || exporting || (preview.workspaceStatus === 'missing' && !recreatedWorkspaceName.trim())}
               >
                 {restoring ? <Loader2 className="animate-spin" /> : <Upload />}
-                {restoring ? 'Restoring...' : 'Replace current data'}
-              </Button>
+                {restoring
+                  ? 'Restoring...'
+                  : preview.workspaceStatus === 'missing'
+                    ? 'Create workspace and restore'
+                    : 'Replace current data'}
+              </Button>}
             </div>
           )}
         </section>
@@ -374,13 +428,16 @@ export function DataStoragePanel() {
                   <div className="space-y-1">
                     <h4 className="font-medium">{option.title}</h4>
                     <p className="text-sm text-muted-foreground">{option.description}</p>
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {dataResetTargetLabel(operation, selectedWorkspace?.name)}
+                    </p>
                   </div>
                   <Button
                     type="button"
                     variant="outline"
                     className="mt-auto"
                     onClick={() => reviewResetImpact(operation)}
-                    disabled={resetPreviewing !== null || resetting || restoring}
+                    disabled={resetPreviewing !== null || resetting || restoring || !canUseDataReset(operation, workspaceId)}
                   >
                     {isPreviewing ? <Loader2 className="animate-spin" /> : <RotateCcw />}
                     {isPreviewing ? 'Reviewing...' : 'Review impact'}
@@ -399,17 +456,18 @@ export function DataStoragePanel() {
               <div className="space-y-2 text-sm">
                 {resetPreview.operation === 'clear_activity' && (
                   <>
-                    <p><strong>{formatCount(resetPreview.currentCounts.transactions, 'transaction')}</strong> will be removed.</p>
-                    <p><strong>{formatCount(resetPreview.currentCounts.imports, 'import')}</strong> will be removed.</p>
-                    <p>Accounts, categories, import templates, budgets, rules, and workspaces will be preserved.</p>
+                    <p><strong>{formatCount(resetPreview.currentCounts.transactions, 'transaction')}</strong> and <strong>{formatCount(resetPreview.currentCounts.imports, 'import')}</strong> in {resetPreview.workspaceName} will be removed.</p>
+                    <p>Financial setup and the workspace itself will be preserved.</p>
+                    <p>Other workspaces will not be affected.</p>
                   </>
                 )}
                 {resetPreview.operation === 'reset_financial' && (
                   <>
                     <p>{formatCount(resetPreview.currentCounts.accounts, 'account')}, {formatCount(resetPreview.currentCounts.transactions, 'transaction')}, and {formatCount(resetPreview.currentCounts.imports, 'import')} will be removed.</p>
                     <p>{formatCount(resetPreview.currentCounts.importTemplates, 'import template')}, {formatCount(resetPreview.currentCounts.budgets, 'budget record')}, and {formatCount(resetPreview.currentCounts.rules, 'rule')} will be removed.</p>
-                    <p>{formatCount(resetPreview.customCategoryCount, 'custom category', 'custom categories')} and {formatCount(resetPreview.customSubcategoryCount, 'custom subcategory', 'custom subcategories')} will be removed; system defaults will be restored.</p>
-                    <p>{formatCount(resetPreview.currentCounts.workspaces, 'workspace')} will be preserved.</p>
+                    <p>{formatCount(resetPreview.customCategoryCount, 'custom category', 'custom categories')} and {formatCount(resetPreview.customSubcategoryCount, 'custom subcategory', 'custom subcategories')} will be removed; starter categories will be restored.</p>
+                    <p>{resetPreview.workspaceName} and its base currency will be preserved.</p>
+                    <p>Other workspaces will not be affected.</p>
                   </>
                 )}
                 {resetPreview.operation === 'factory_reset' && (

@@ -18,7 +18,15 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
-    const result = await restoreBackup(upload.json);
+    const recreateMissingWorkspace = upload.formData.get('recreateMissingWorkspace') === 'true';
+    const recreatedWorkspaceNameValue = upload.formData.get('recreatedWorkspaceName');
+    const recreatedWorkspaceName = typeof recreatedWorkspaceNameValue === 'string'
+      ? recreatedWorkspaceNameValue
+      : undefined;
+    const result = await restoreBackup(upload.json, {
+      recreateMissingWorkspace,
+      recreatedWorkspaceName,
+    });
     return NextResponse.json({ ok: true, result }, {
       headers: { 'Cache-Control': 'no-store' },
     });

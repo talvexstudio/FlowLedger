@@ -24,6 +24,7 @@ import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { apiDeleteRule, apiGetRules, apiSaveRule } from '@/lib/api';
 import { getChangedRules } from '@/lib/settings-change-sets';
 import type { ClassificationRule, Transaction } from '@/lib/types';
+import { isWorkspaceResponseCurrent } from '@/lib/workspace-client-state';
 
 const ANY_VALUE = '__any__';
 
@@ -33,11 +34,17 @@ export function ClassificationRulesTab() {
   const [editableRules, setEditableRules] = React.useState<ClassificationRule[]>([]);
   const [isSaving, setIsSaving] = React.useState(false);
   const loadedRulesRef = React.useRef<ClassificationRule[]>([]);
+  const workspaceIdRef = React.useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
 
   const loadRules = React.useCallback(async () => {
+    loadedRulesRef.current = [];
+    setEditableRules([]);
     if (!workspaceId) return;
+    const requestedWorkspaceId = workspaceId;
     try {
       const data = await apiGetRules(workspaceId);
+      if (!isWorkspaceResponseCurrent(workspaceIdRef.current, requestedWorkspaceId)) return;
       const normalized = data.map((rule) => ({
         ...rule,
         match: rule.match ?? {},
@@ -46,6 +53,7 @@ export function ClassificationRulesTab() {
       loadedRulesRef.current = normalized;
       setEditableRules(normalized);
     } catch (error) {
+      if (!isWorkspaceResponseCurrent(workspaceIdRef.current, requestedWorkspaceId)) return;
       console.error(error);
       toast({
         variant: 'destructive',

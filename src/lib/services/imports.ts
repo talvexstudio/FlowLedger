@@ -10,8 +10,12 @@ import {
   getTransactions,
   saveTransaction,
 } from "./transactions";
-import { getAccounts } from './accounts';
+import { getAccounts, requireAccount } from './accounts';
 import { normalizeTransactionTypeFields, validateInternalTransfer } from '../internal-transfer';
+import {
+  assertWorkspaceDocumentExists,
+  assertWorkspaceExists,
+} from './workspace-integrity';
 
 const importsCollection = (workspaceId: string) => `workspaces/${workspaceId}/imports`;
 const templatesCollection = (workspaceId: string) => `workspaces/${workspaceId}/importTemplates`;
@@ -20,8 +24,11 @@ export const saveImportSession = async (
   workspaceId: string,
   session: Omit<ImportSession, "id">
 ): Promise<ImportSession> => {
-  const docRef = await db.collection(importsCollection(workspaceId)).add(session);
-  return { ...session, id: docRef.id };
+  await assertWorkspaceExists(workspaceId);
+  await requireAccount(workspaceId, session.accountId);
+  const payload = { ...session, workspaceId };
+  const docRef = await db.collection(importsCollection(workspaceId)).add(payload);
+  return { ...payload, id: docRef.id };
 };
 
 export const getImportSessions = async (workspaceId: string): Promise<ImportSession[]> => {
@@ -30,6 +37,12 @@ export const getImportSessions = async (workspaceId: string): Promise<ImportSess
 };
 
 export const deleteImportSession = async (workspaceId: string, importId: string): Promise<void> => {
+  await assertWorkspaceExists(workspaceId);
+  await assertWorkspaceDocumentExists(workspaceId, 'imports', importId, 'Import session');
+  const transactions = await db.collection(`workspaces/${workspaceId}/transactions`).get();
+  if (transactions.docs.some((doc) => doc.data().importId === importId)) {
+    throw new Error('This import session still has transactions and cannot be deleted independently.');
+  }
   await db.collection(importsCollection(workspaceId)).doc(importId).delete();
 };
 
@@ -42,17 +55,58 @@ export const getImportTemplates = async (
   );
 };
 
+export const getImportTemplate = async (
+  workspaceId: string,
+  templateId: string
+): Promise<ImportTemplate | null> => {
+  const snapshot = await db.collection(templatesCollection(workspaceId)).doc(templateId).get();
+  return snapshot.exists
+    ? ({ id: templateId, ...snapshot.data() } as ImportTemplate)
+    : null;
+};
+
 export const saveImportTemplate = async (
   workspaceId: string,
-  data: Omit<ImportTemplate, "id" | "createdAt">
+  data: Omit<ImportTemplate, "id" | "createdAt"> & {
+    id?: string;
+    createdAt?: Date;
+  }
 ): Promise<ImportTemplate> => {
+  await assertWorkspaceExists(workspaceId);
+  if (data.defaultAccountId) {
+    await requireAccount(workspaceId, data.defaultAccountId);
+  }
   const coll = db.collection(templatesCollection(workspaceId));
+  if (data.id) {
+    const existing = await getImportTemplate(workspaceId, data.id);
+    if (!existing) throw new Error('Import template not found in the selected workspace.');
+    const { id, createdAt: _createdAt, ...templateData } = data;
+    const payload = {
+      ...templateData,
+      workspaceId,
+      createdAt: existing.createdAt,
+    } as Omit<ImportTemplate, 'id'>;
+    await coll.doc(id).set(payload, { merge: true });
+    return { ...existing, ...payload, id };
+  }
+  const { id: _id, createdAt: _createdAt, ...templateData } = data;
   const payload: Omit<ImportTemplate, "id"> = {
-    ...data,
+    ...templateData,
+    workspaceId,
     createdAt: new Date(),
   };
   const docRef = await coll.add(payload);
   return { ...payload, id: docRef.id };
+};
+
+export const deleteImportTemplate = async (
+  workspaceId: string,
+  templateId: string
+): Promise<void> => {
+  await assertWorkspaceExists(workspaceId);
+  const existing = await getImportTemplate(workspaceId, templateId);
+  if (!existing) throw new Error('Import template not found in the selected workspace.');
+  await db.collection(templatesCollection(workspaceId)).doc(templateId).delete();
 };
 
 export const findMatchingTemplate = async (

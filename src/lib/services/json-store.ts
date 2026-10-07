@@ -17,6 +17,13 @@ export class JsonStoreReadError extends Error {
   }
 }
 
+export class JsonStoreWorkspaceError extends Error {
+  constructor(message = 'The requested record does not belong to this workspace.') {
+    super(message);
+    this.name = 'JsonStoreWorkspaceError';
+  }
+}
+
 export const getDataDirectory = (override?: string) =>
   override ?? process.env.FLOWLEDGER_DATA_DIR ?? path.join(process.cwd(), 'data');
 
@@ -106,8 +113,9 @@ const resolveStore = (collPath: string) => {
   };
 };
 
-const newId = (prefix: string) =>
-  `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+// Persisted IDs are globally unique across workspaces. workspaceId is still an
+// ownership boundary and is checked independently for every scoped document operation.
+const newId = (prefix: string) => `${prefix}_${randomUUID()}`;
 
 const now = () => new Date().toISOString();
 
@@ -131,6 +139,38 @@ export const createJsonStore = (options: { dataDirectory?: string } = {}) => {
         return workspaceId ? all.filter((document) => document.workspaceId === workspaceId) : all;
       };
 
+      const matchingIndexes = (all: JsonDocument[], id: string) => all
+        .map((document, index) => ({ document, index }))
+        .filter(({ document }) => document.id === id);
+
+      const findDocumentIndex = (all: JsonDocument[], id: string) => {
+        const matches = matchingIndexes(all, id);
+        const scopedMatches = workspaceId
+          ? matches.filter(({ document }) => document.workspaceId === workspaceId)
+          : matches;
+        if (scopedMatches.length > 1) {
+          throw new Error(`Persisted store contains duplicate id ${id} in ${definition.filename}`);
+        }
+        return scopedMatches[0]?.index ?? -1;
+      };
+
+      const assertWorkspacePayload = (incoming: JsonDocument) => {
+        if (
+          workspaceId &&
+          incoming.workspaceId !== undefined &&
+          incoming.workspaceId !== workspaceId
+        ) {
+          throw new JsonStoreWorkspaceError();
+        }
+      };
+
+      const missingMutationError = (all: JsonDocument[], id: string) => {
+        if (workspaceId && matchingIndexes(all, id).length > 0) {
+          return new JsonStoreWorkspaceError();
+        }
+        return new Error(`Document ${id} not found in ${definition.filename}`);
+      };
+
       return {
         get: async () => {
           const docs = getFiltered();
@@ -140,14 +180,21 @@ export const createJsonStore = (options: { dataDirectory?: string } = {}) => {
         doc: (id: string) => ({
           get: async () => {
             const all = readStore(storeKey);
-            const document = all.find((candidate) => candidate.id === id);
+            const index = findDocumentIndex(all, id);
+            const document = index >= 0 ? all[index] : undefined;
             return { exists: !!document, data: () => document };
           },
           set: async (incoming: JsonDocument, setOptions?: { merge: boolean }) =>
             withDataLock(() => {
+              assertWorkspacePayload(incoming);
               const all = readStore(storeKey);
-              const index = all.findIndex((candidate) => candidate.id === id);
-              const base = workspaceId && !incoming.workspaceId ? { workspaceId } : {};
+              const index = findDocumentIndex(all, id);
+              if (index === -1 && matchingIndexes(all, id).length > 0) {
+                throw new JsonStoreWorkspaceError(
+                  'A record with this globally unique ID belongs to another workspace.'
+                );
+              }
+              const base = workspaceId ? { workspaceId } : {};
               const document = { ...incoming, ...base, id, updatedAt: now() };
               if (index > -1) {
                 all[index] = setOptions?.merge ? { ...all[index], ...document } : document;
@@ -158,24 +205,38 @@ export const createJsonStore = (options: { dataDirectory?: string } = {}) => {
             }),
           update: async (patch: JsonDocument) =>
             withDataLock(() => {
+              assertWorkspacePayload(patch);
               const all = readStore(storeKey);
-              const index = all.findIndex((candidate) => candidate.id === id);
-              if (index === -1) throw new Error(`Document ${id} not found in ${definition.filename}`);
-              all[index] = { ...all[index], ...patch, updatedAt: now() };
+              const index = findDocumentIndex(all, id);
+              if (index === -1) throw missingMutationError(all, id);
+              all[index] = {
+                ...all[index],
+                ...patch,
+                ...(workspaceId ? { workspaceId } : {}),
+                id,
+                updatedAt: now(),
+              };
               writeStore(storeKey, all);
             }),
           delete: async () =>
             withDataLock(() => {
               const all = readStore(storeKey);
-              writeStore(storeKey, all.filter((document) => document.id !== id));
+              const index = findDocumentIndex(all, id);
+              if (index === -1) throw missingMutationError(all, id);
+              all.splice(index, 1);
+              writeStore(storeKey, all);
             }),
         }),
 
         add: async (incoming: JsonDocument) =>
           withDataLock(() => {
+            assertWorkspacePayload(incoming);
             const all = readStore(storeKey);
-            const id = newId(definition.filename.slice(0, 3));
-            const base = workspaceId && !incoming.workspaceId ? { workspaceId } : {};
+            let id = newId(definition.filename.slice(0, 3));
+            while (matchingIndexes(all, id).length > 0) {
+              id = newId(definition.filename.slice(0, 3));
+            }
+            const base = workspaceId ? { workspaceId } : {};
             const document = { createdAt: now(), ...incoming, ...base, id, updatedAt: now() };
             all.push(document);
             writeStore(storeKey, all);

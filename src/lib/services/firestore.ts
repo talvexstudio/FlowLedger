@@ -2,7 +2,6 @@
 // All data is persisted to /data/*.json files on disk.
 
 import { jsonStore } from './json-store';
-import type { Transaction } from '../types';
 
 export const db = jsonStore;
 
@@ -12,7 +11,9 @@ export const hasTransactionsForAccount = async (
 ): Promise<boolean> => {
   const snapshot = await db
     .collection(`workspaces/${workspaceId}/transactions`)
-    .where('accountId', '==', accountId)
     .get();
-  return snapshot.docs.length > 0;
+  return snapshot.docs.some((doc) => {
+    const transaction = doc.data();
+    return transaction.accountId === accountId || transaction.destinationAccountId === accountId;
+  });
 };

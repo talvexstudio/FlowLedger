@@ -1,5 +1,5 @@
 import {
-  cloneDefaultSystemCategories,
+  cloneDefaultBootstrapCategories,
   cloneDefaultWorkspaces,
   type PersistedRecord,
 } from './default-data';
@@ -30,6 +30,7 @@ export type DataScopeDefinition = {
   label: string;
   description: string;
   includedStores: readonly PersistedStoreKey[];
+  workspaceMode: 'selected' | 'all';
 };
 
 export const DATA_SCOPE_DEFINITIONS: Record<BackupScope, DataScopeDefinition> = {
@@ -38,18 +39,21 @@ export const DATA_SCOPE_DEFINITIONS: Record<BackupScope, DataScopeDefinition> = 
     label: 'Activity',
     description: 'Transactions and import history',
     includedStores: ['imports', 'transactions'],
+    workspaceMode: 'selected',
   },
   financial_data: {
     key: 'financial_data',
     label: 'Financial Data',
     description: 'Accounts, categories, transactions, imports, import templates, budgets, and rules',
     includedStores: ['accounts', 'categories', 'imports', 'importTemplates', 'budgets', 'rules', 'transactions'],
+    workspaceMode: 'selected',
   },
   everything: {
     key: 'everything',
     label: 'Everything',
     description: 'All FlowLedger data, including workspaces',
     includedStores: [...PERSISTED_STORE_KEYS],
+    workspaceMode: 'all',
   },
 };
 
@@ -94,8 +98,8 @@ export const PERSISTED_STORES: Record<PersistedStoreKey, PersistedStoreDefinitio
   },
   categories: {
     key: 'categories', collectionName: 'categories', filename: 'categories.json', schemaVersion: 1,
-    workspaceScoped: false, restoreOrder: 20, dependencies: [], requiredInScopes: ['financial_data', 'everything'],
-    validate: STORE_VALIDATORS.categories, defaultInitializer: cloneDefaultSystemCategories,
+    workspaceScoped: true, restoreOrder: 20, dependencies: ['workspaces'], requiredInScopes: ['financial_data', 'everything'],
+    validate: STORE_VALIDATORS.categories, defaultInitializer: cloneDefaultBootstrapCategories,
   },
   imports: {
     key: 'imports', collectionName: 'imports', filename: 'imports.json', schemaVersion: 1,

@@ -24,6 +24,14 @@ import type {
   TransactionBulkDeletePreview,
   TransactionBulkDeleteResult,
 } from '@/lib/data-management/transaction-bulk-delete-types';
+import type {
+  CreateWorkspaceInput,
+  CreateWorkspaceResult,
+} from '@/lib/workspace-lifecycle-types';
+import type {
+  WorkspaceDeletionPreview,
+  WorkspaceDeletionResult,
+} from '@/lib/data-management/workspace-deletion-types';
 
 async function call<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -31,7 +39,12 @@ async function call<T>(url: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   const json = await res.json();
-  if (!res.ok) throw new Error(json?.error ?? `Request failed: ${res.status}`);
+  if (!res.ok) {
+    const message = typeof json?.error === 'string'
+      ? json.error
+      : json?.error?.message;
+    throw new Error(message ?? `Request failed: ${res.status}`);
+  }
   return json as T;
 }
 
@@ -39,8 +52,29 @@ async function call<T>(url: string, options?: RequestInit): Promise<T> {
 export const apiGetWorkspaces = () =>
   call<Workspace[]>('/api/workspaces');
 
-export const apiSaveWorkspace = (data: Partial<Workspace>) =>
-  call<Workspace>('/api/workspaces', { method: 'POST', body: JSON.stringify(data) });
+export const apiCreateWorkspace = (data: CreateWorkspaceInput) =>
+  call<CreateWorkspaceResult>('/api/workspaces', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+
+export const apiRenameWorkspace = (workspaceId: string, name: string) =>
+  call<Workspace>('/api/workspaces', {
+    method: 'PATCH',
+    body: JSON.stringify({ workspaceId, name }),
+  });
+
+export const apiPreviewWorkspaceDeletion = (workspaceId: string) =>
+  call<{ ok: true; preview: WorkspaceDeletionPreview }>(
+    '/api/data-management/workspaces/delete/preview',
+    { method: 'POST', body: JSON.stringify({ workspaceId }) }
+  ).then((response) => response.preview);
+
+export const apiDeleteWorkspace = (workspaceId: string) =>
+  call<{ ok: true; result: WorkspaceDeletionResult }>(
+    '/api/data-management/workspaces/delete',
+    { method: 'POST', body: JSON.stringify({ workspaceId, confirmDelete: true }) }
+  ).then((response) => response.result);
 
 // ─── Accounts ──────────────────────────────────────────────────────────────
 export const apiGetAccounts = (workspaceId: string) =>
@@ -114,25 +148,34 @@ export const apiCreateCounterpartForExisting = (
 });
 
 // ─── Categories ────────────────────────────────────────────────────────────
-export const apiGetCategories = () =>
-  call<(Category & { subcategories: Subcategory[] })[]>('/api/categories');
+export const apiGetCategories = (workspaceId: string) =>
+  call<(Category & { subcategories: Subcategory[] })[]>(`/api/categories?workspaceId=${workspaceId}`);
 
-export const buildCategorySaveRequest = (data: Category) => ({
+export const buildCategorySaveRequest = (
+  workspaceId: string,
+  data: Category | Omit<Category, 'id'>
+) => ({
   entity: 'category' as const,
+  workspaceId,
   data,
 });
 
-export const buildSubcategorySaveRequest = (categoryId: string, data: Subcategory) => ({
+export const buildSubcategorySaveRequest = (
+  workspaceId: string,
+  categoryId: string,
+  data: Subcategory
+) => ({
   entity: 'subcategory' as const,
+  workspaceId,
   categoryId,
   data: { ...data, categoryId },
 });
 
-export const apiSaveCategory = (data: Category) =>
-  call<Category>('/api/categories', { method: 'POST', body: JSON.stringify(buildCategorySaveRequest(data)) });
+export const apiSaveCategory = (workspaceId: string, data: Category | Omit<Category, 'id'>) =>
+  call<Category>('/api/categories', { method: 'POST', body: JSON.stringify(buildCategorySaveRequest(workspaceId, data)) });
 
-export const apiSaveSubcategory = (categoryId: string, data: Subcategory) =>
-  call<Subcategory>('/api/categories', { method: 'POST', body: JSON.stringify(buildSubcategorySaveRequest(categoryId, data)) });
+export const apiSaveSubcategory = (workspaceId: string, categoryId: string, data: Subcategory) =>
+  call<Subcategory>('/api/categories', { method: 'POST', body: JSON.stringify(buildSubcategorySaveRequest(workspaceId, categoryId, data)) });
 
 // ─── Rules ─────────────────────────────────────────────────────────────────
 export const apiGetRules = (workspaceId: string) =>

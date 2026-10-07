@@ -5,7 +5,6 @@ import {
   createInternalTransferPair,
   confirmTransaction,
   deleteTransaction,
-  deleteTransactionsByImport,
   getTransaction,
   findTransferCounterpartCandidates,
   linkExistingTransferPair,
@@ -137,7 +136,7 @@ export async function POST(req: NextRequest) {
             { status: 409 }
           );
         }
-        const categories = await getCategories();
+        const categories = await getCategories(workspaceId);
         if (!isTransactionSufficientlyClassified(candidate, categories, accounts, workspaceId)) {
           const transferValidation = validateInternalTransfer(candidate, accounts, workspaceId);
           return NextResponse.json(
@@ -197,7 +196,7 @@ export async function PATCH(req: NextRequest) {
           { status: 409 }
         );
       }
-      const categories = await getCategories();
+      const categories = await getCategories(workspaceId);
       const accounts = await getAccounts(workspaceId);
       if (!isTransactionSufficientlyClassified(transaction, categories, accounts, workspaceId)) {
         const transferValidation = validateInternalTransfer(transaction, accounts, workspaceId);
@@ -236,7 +235,10 @@ export async function DELETE(req: NextRequest) {
     if (!workspaceId) return NextResponse.json({ error: 'workspaceId required' }, { status: 400 });
 
     if (importId) {
-      await deleteTransactionsByImport(workspaceId, importId);
+      return NextResponse.json(
+        { error: 'Delete imported transactions through Import History so the operation is atomic and pair-safe.' },
+        { status: 409 }
+      );
     } else if (id) {
       await deleteTransaction(workspaceId, id);
     } else {

@@ -15,6 +15,7 @@ import {
   type RestoreScope,
 } from './store-manifest';
 import { BACKUP_FORMAT_VERSION } from './version';
+import { isWorkspaceOwnedRecord } from './workspace-scope';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -25,6 +26,17 @@ export type ValidatedRestoreBackup = {
   createdAt: string;
   scope: RestoreScope;
   workspaceIds: string[];
+  workspaceSelection: {
+    mode: 'all';
+    ids: string[];
+  } | {
+    mode: 'selected';
+    ids: [string];
+    sourceWorkspaceId: string;
+    sourceWorkspaceName: string;
+    sourceWorkspaceBaseCurrency: string;
+  };
+  isLegacyGlobal: boolean;
   includedStores: PersistedStoreKey[];
   data: Record<PersistedStoreKey, BackupRecord[]>;
 };
@@ -43,6 +55,13 @@ export type RestorePreview = {
   storesToClear: PersistedStoreKey[];
   compatibilityStatus: 'compatible';
   validationResult: 'valid';
+  workspaceStatus: 'not_applicable' | 'available' | 'missing';
+  sourceWorkspaceId?: string;
+  sourceWorkspaceName?: string;
+  sourceWorkspaceBaseCurrency?: string;
+  canRestore: boolean;
+  canRecreateWorkspace: boolean;
+  recreationBlockReason?: string;
 };
 
 const isRecord = (value: unknown): value is UnknownRecord =>
@@ -108,17 +127,46 @@ const requireReference = (
   }
 };
 
+const requireRequiredReference = (
+  collection: Map<string, BackupRecord>,
+  id: string | undefined,
+  message: string
+) => {
+  if (!id || !collection.has(id)) {
+    throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', message);
+  }
+};
+
 const validateCategoryReference = (
   record: BackupRecord,
   label: string,
   categories: Map<string, BackupRecord>,
-  subcategoryParents: Map<string, string>
+  subcategoryParents: Map<string, { categoryId: string; workspaceId: string }>,
+  workspaceId: string | undefined,
+  categoryRequired = false
 ) => {
   const categoryId = optionalString(record, 'categoryId');
   const subcategoryId = optionalString(record, 'subcategoryId');
+  if (categoryRequired && !categoryId) {
+    throw new RestoreError(
+      'REFERENTIAL_INTEGRITY_FAILURE',
+      `${label} references a missing category.`
+    );
+  }
   requireReference(categories, categoryId, `${label} references a missing category.`);
+  if (categoryId && effectiveCategoryWorkspaceId(categories.get(categoryId)!) !== workspaceId) {
+    throw new RestoreError(
+      'REFERENTIAL_INTEGRITY_FAILURE',
+      `${label} category belongs to a different workspace.`
+    );
+  }
   if (subcategoryId) {
-    if (!categoryId || subcategoryParents.get(subcategoryId) !== categoryId) {
+    const parent = subcategoryParents.get(subcategoryId);
+    if (
+      !categoryId ||
+      parent?.categoryId !== categoryId ||
+      parent?.workspaceId !== workspaceId
+    ) {
       throw new RestoreError(
         'REFERENTIAL_INTEGRITY_FAILURE',
         `${label} has a subcategory that does not belong to its category.`
@@ -126,6 +174,9 @@ const validateCategoryReference = (
     }
   }
 };
+
+const effectiveCategoryWorkspaceId = (category: BackupRecord) =>
+  optionalString(category, 'workspaceId') ?? 'ws1';
 
 const validateLinkedPair = (
   source: BackupRecord,
@@ -145,6 +196,10 @@ const validateLinkedPair = (
       (source.internalDirection === 'Out' && counterpart.internalDirection === 'In') ||
       (source.internalDirection === 'In' && counterpart.internalDirection === 'Out')
     ) ||
+    (source.internalDirection === 'Out' && Number(source.amountBase) >= 0) ||
+    (source.internalDirection === 'In' && Number(source.amountBase) <= 0) ||
+    (counterpart.internalDirection === 'Out' && Number(counterpart.amountBase) >= 0) ||
+    (counterpart.internalDirection === 'In' && Number(counterpart.amountBase) <= 0) ||
     Math.round(Number(source.amountBase) * 100) + Math.round(Number(counterpart.amountBase) * 100) !== 0
   ) {
     throw new RestoreError(
@@ -168,30 +223,44 @@ export const validateRestoreReferences = (
   void importTemplates;
   void rules;
 
-  const subcategoryParents = new Map<string, string>();
+  const subcategoryParents = new Map<string, { categoryId: string; workspaceId: string }>();
   for (const category of categories.values()) {
     const categoryId = recordId(category);
+    const categoryWorkspaceId = effectiveCategoryWorkspaceId(category);
+    requireReference(
+      workspaces,
+      categoryWorkspaceId,
+      'A category references a missing workspace.'
+    );
     for (const value of category.subcategories as BackupRecord[]) {
       const subcategoryId = recordId(value);
-      if (subcategoryParents.has(subcategoryId) || value.categoryId !== categoryId) {
+      const subcategoryWorkspaceId = optionalString(value, 'workspaceId') ?? categoryWorkspaceId;
+      if (
+        subcategoryParents.has(subcategoryId) ||
+        value.categoryId !== categoryId ||
+        subcategoryWorkspaceId !== categoryWorkspaceId
+      ) {
         throw new RestoreError(
           'REFERENTIAL_INTEGRITY_FAILURE',
           'The category taxonomy contains an invalid or duplicate subcategory relationship.'
         );
       }
-      subcategoryParents.set(subcategoryId, categoryId);
+      subcategoryParents.set(subcategoryId, {
+        categoryId,
+        workspaceId: categoryWorkspaceId,
+      });
     }
   }
 
   for (const account of accounts.values()) {
-    requireReference(workspaces, optionalString(account, 'workspaceId'), 'An account references a missing workspace.');
+    requireRequiredReference(workspaces, optionalString(account, 'workspaceId'), 'An account references a missing workspace.');
   }
 
   for (const importSession of imports.values()) {
     const workspaceId = optionalString(importSession, 'workspaceId');
     const accountId = optionalString(importSession, 'accountId');
-    requireReference(workspaces, workspaceId, 'An import references a missing workspace.');
-    requireReference(accounts, accountId, 'An import references a missing account.');
+    requireRequiredReference(workspaces, workspaceId, 'An import references a missing workspace.');
+    requireRequiredReference(accounts, accountId, 'An import references a missing account.');
     if (accountId && accounts.get(accountId)?.workspaceId !== workspaceId) {
       throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'An import account belongs to a different workspace.');
     }
@@ -200,7 +269,7 @@ export const validateRestoreReferences = (
   for (const template of data.importTemplates) {
     const workspaceId = optionalString(template, 'workspaceId');
     const accountId = optionalString(template, 'defaultAccountId');
-    requireReference(workspaces, workspaceId, 'An import template references a missing workspace.');
+    requireRequiredReference(workspaces, workspaceId, 'An import template references a missing workspace.');
     requireReference(accounts, accountId, 'An import template references a missing default account.');
     if (accountId && accounts.get(accountId)?.workspaceId !== workspaceId) {
       throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'An import template account belongs to a different workspace.');
@@ -209,7 +278,7 @@ export const validateRestoreReferences = (
 
   for (const rule of data.rules) {
     const workspaceId = optionalString(rule, 'workspaceId');
-    requireReference(workspaces, workspaceId, 'A rule references a missing workspace.');
+    requireRequiredReference(workspaces, workspaceId, 'A rule references a missing workspace.');
     const match = rule.match as BackupRecord;
     const action = rule.action as BackupRecord;
     const accountId = optionalString(match, 'accountId');
@@ -217,7 +286,7 @@ export const validateRestoreReferences = (
     if (accountId && accounts.get(accountId)?.workspaceId !== workspaceId) {
       throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'A rule account belongs to a different workspace.');
     }
-    validateCategoryReference(action, 'A rule', categories, subcategoryParents);
+    validateCategoryReference(action, 'A rule', categories, subcategoryParents, workspaceId);
   }
 
   const budgetHeaders = new Map(
@@ -225,16 +294,29 @@ export const validateRestoreReferences = (
       .filter((record) => record.recordType !== 'line')
       .map((record) => [recordId(record), record])
   );
+  const budgetYears = new Set<string>();
   for (const budget of budgets.values()) {
     const workspaceId = optionalString(budget, 'workspaceId');
-    requireReference(workspaces, workspaceId, 'A budget references a missing workspace.');
+    requireRequiredReference(workspaces, workspaceId, 'A budget references a missing workspace.');
     if (budget.recordType === 'line') {
       const headerId = optionalString(budget, 'budgetId');
-      requireReference(budgetHeaders, headerId, 'A budget line references a missing budget header.');
+      requireRequiredReference(budgetHeaders, headerId, 'A budget line references a missing budget header.');
       if (headerId && budgetHeaders.get(headerId)?.workspaceId !== workspaceId) {
         throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'A budget line belongs to a different workspace than its header.');
       }
-      validateCategoryReference(budget, 'A budget line', categories, subcategoryParents);
+      if (headerId && budgetHeaders.get(headerId)?.year !== budget.year) {
+        throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'A budget line year does not match its budget header.');
+      }
+      validateCategoryReference(budget, 'A budget line', categories, subcategoryParents, workspaceId, true);
+    } else {
+      const budgetYearKey = `${workspaceId ?? ''}:${String(budget.year)}`;
+      if (budgetYears.has(budgetYearKey)) {
+        throw new RestoreError(
+          'REFERENTIAL_INTEGRITY_FAILURE',
+          'More than one budget exists for the same workspace and year.'
+        );
+      }
+      budgetYears.add(budgetYearKey);
     }
   }
 
@@ -246,8 +328,8 @@ export const validateRestoreReferences = (
     const importId = optionalString(transaction, 'importId');
     const linkedTransactionId = optionalString(transaction, 'linkedTransactionId');
 
-    requireReference(workspaces, workspaceId, 'A transaction references a missing workspace.');
-    requireReference(accounts, accountId, 'A transaction references a missing account.');
+    requireRequiredReference(workspaces, workspaceId, 'A transaction references a missing workspace.');
+    requireRequiredReference(accounts, accountId, 'A transaction references a missing account.');
     requireReference(accounts, destinationAccountId, 'A transaction references a missing counterpart account.');
     requireReference(imports, importId, 'A transaction references a missing import session.');
     requireReference(transactions, linkedTransactionId, 'A transaction references a missing linked transaction.');
@@ -263,7 +345,7 @@ export const validateRestoreReferences = (
     if (importId && imports.get(importId)?.workspaceId !== workspaceId) {
       throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'A transaction import belongs to a different workspace.');
     }
-    validateCategoryReference(transaction, 'A transaction', categories, subcategoryParents);
+    validateCategoryReference(transaction, 'A transaction', categories, subcategoryParents, workspaceId);
 
     if (linkedTransactionId) {
       if (linkedTransactionId === transactionId) {
@@ -312,16 +394,48 @@ export const validateRestoreBackup = (input: unknown): ValidatedRestoreBackup =>
     invalid('containsSensitiveFinancialData is missing or invalid.');
   }
 
-  if (!isRecord(backup.workspaceSelection) || backup.workspaceSelection.mode !== 'all') {
+  if (!isRecord(backup.workspaceSelection)) {
     invalid('workspaceSelection is missing or invalid.');
   }
   const workspaceSelection = backup.workspaceSelection as UnknownRecord;
+  if (workspaceSelection.mode !== 'all' && workspaceSelection.mode !== 'selected') {
+    invalid('workspaceSelection mode is invalid.');
+  }
   if (
     !Array.isArray(workspaceSelection.ids) ||
     !workspaceSelection.ids.every((id) => typeof id === 'string' && id.trim() !== '') ||
     new Set(workspaceSelection.ids).size !== workspaceSelection.ids.length
   ) {
     invalid('workspaceSelection.ids is invalid.');
+  }
+
+  let validatedWorkspaceSelection: ValidatedRestoreBackup['workspaceSelection'];
+  if (workspaceSelection.mode === 'selected') {
+    if (scope === 'everything' || scope === LEGACY_RESTORE_SCOPE) {
+      invalid('This backup scope cannot use a selected-workspace envelope.');
+    }
+    const sourceWorkspaceId = requireString(workspaceSelection, 'sourceWorkspaceId');
+    const sourceWorkspaceName = requireString(workspaceSelection, 'sourceWorkspaceName');
+    const sourceWorkspaceBaseCurrency = requireString(workspaceSelection, 'sourceWorkspaceBaseCurrency');
+    const workspaceIds = workspaceSelection.ids as string[];
+    if (
+      workspaceIds.length !== 1 ||
+      workspaceIds[0] !== sourceWorkspaceId
+    ) {
+      invalid('workspaceSelection.ids must identify the selected source workspace.');
+    }
+    validatedWorkspaceSelection = {
+      mode: 'selected',
+      ids: [sourceWorkspaceId],
+      sourceWorkspaceId,
+      sourceWorkspaceName,
+      sourceWorkspaceBaseCurrency,
+    };
+  } else {
+    validatedWorkspaceSelection = {
+      mode: 'all',
+      ids: [...workspaceSelection.ids as string[]],
+    };
   }
 
   const expectedStores = [...RESTORE_SCOPE_STORES[scope]];
@@ -389,12 +503,36 @@ export const validateRestoreBackup = (input: unknown): ValidatedRestoreBackup =>
 
   const representedWorkspaceIds = collectWorkspaceIds(canonicalData);
   const declaredWorkspaceIds = [...workspaceSelection.ids as string[]].sort();
-  if (!equalMembers(declaredWorkspaceIds, representedWorkspaceIds)) {
-    invalid('workspaceSelection.ids does not match the workspaces represented in the backup.');
+  if (validatedWorkspaceSelection.mode === 'all') {
+    if (!equalMembers(declaredWorkspaceIds, representedWorkspaceIds)) {
+      invalid('workspaceSelection.ids does not match the workspaces represented in the backup.');
+    }
+  } else {
+    const sourceWorkspaceId = validatedWorkspaceSelection.sourceWorkspaceId;
+    if (representedWorkspaceIds.some((workspaceId) => workspaceId !== sourceWorkspaceId)) {
+      invalid('The backup payload contains records from outside its selected workspace.');
+    }
+    for (const key of includedStores) {
+      if (!canonicalData[key].every((record) => isWorkspaceOwnedRecord(key, record, sourceWorkspaceId))) {
+        invalid(`Backup data for ${key} contains records from outside its selected workspace.`);
+      }
+    }
   }
 
   if (scope === 'everything' || scope === LEGACY_RESTORE_SCOPE) {
     validateRestoreReferences(canonicalData);
+  } else if (validatedWorkspaceSelection.mode === 'selected' && scope === 'financial_data') {
+    validateRestoreReferences({
+      ...canonicalData,
+      workspaces: [{
+        id: validatedWorkspaceSelection.sourceWorkspaceId,
+        ownerUserId: 'local',
+        name: validatedWorkspaceSelection.sourceWorkspaceName,
+        baseCurrency: validatedWorkspaceSelection.sourceWorkspaceBaseCurrency,
+        createdAt,
+        updatedAt: createdAt,
+      }],
+    });
   }
 
   return {
@@ -404,6 +542,10 @@ export const validateRestoreBackup = (input: unknown): ValidatedRestoreBackup =>
     createdAt,
     scope,
     workspaceIds: representedWorkspaceIds,
+    workspaceSelection: validatedWorkspaceSelection,
+    isLegacyGlobal: scope === LEGACY_RESTORE_SCOPE || (
+      scope !== 'everything' && validatedWorkspaceSelection.mode === 'all'
+    ),
     includedStores,
     data: canonicalData,
   };
@@ -419,15 +561,23 @@ export const parseAndValidateRestoreBackup = (json: string) => {
   return validateRestoreBackup(value);
 };
 
-export const buildRestorePreview = (backup: ValidatedRestoreBackup): RestorePreview => ({
+export const buildRestorePreview = (
+  backup: ValidatedRestoreBackup,
+  workspaceStatus: RestorePreview['workspaceStatus'] = backup.workspaceSelection.mode === 'selected'
+    ? 'available'
+    : 'not_applicable',
+  recreation?: { canRecreateWorkspace: boolean; recreationBlockReason?: string }
+): RestorePreview => ({
   createdAt: backup.createdAt,
   flowLedgerVersion: backup.flowLedgerVersion,
   scope: backup.scope,
   scopeLabel: backup.scope === LEGACY_RESTORE_SCOPE
     ? 'Legacy Financial activity'
-    : DATA_SCOPE_DEFINITIONS[backup.scope].label,
-  isLegacy: backup.scope === LEGACY_RESTORE_SCOPE,
-  workspaceCount: backup.workspaceIds.length,
+    : backup.isLegacyGlobal
+      ? `Legacy global ${DATA_SCOPE_DEFINITIONS[backup.scope].label}`
+      : DATA_SCOPE_DEFINITIONS[backup.scope].label,
+  isLegacy: backup.isLegacyGlobal,
+  workspaceCount: backup.workspaceSelection.ids.length,
   counts: Object.fromEntries(
     PERSISTED_STORE_KEYS.map((key) => [key, backup.data[key].length])
   ) as Record<PersistedStoreKey, number>,
@@ -443,4 +593,13 @@ export const buildRestorePreview = (backup: ValidatedRestoreBackup): RestorePrev
     : [],
   compatibilityStatus: 'compatible',
   validationResult: 'valid',
+  workspaceStatus,
+  ...(backup.workspaceSelection.mode === 'selected' ? {
+    sourceWorkspaceId: backup.workspaceSelection.sourceWorkspaceId,
+    sourceWorkspaceName: backup.workspaceSelection.sourceWorkspaceName,
+    sourceWorkspaceBaseCurrency: backup.workspaceSelection.sourceWorkspaceBaseCurrency,
+  } : {}),
+  canRestore: workspaceStatus !== 'missing',
+  canRecreateWorkspace: workspaceStatus === 'missing' && recreation?.canRecreateWorkspace === true,
+  ...(recreation?.recreationBlockReason ? { recreationBlockReason: recreation.recreationBlockReason } : {}),
 });

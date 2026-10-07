@@ -1,7 +1,7 @@
 import { canonicalizeStoreRecords, type BackupRecord } from './backup';
 import { withDataLock } from './data-lock';
 import {
-  cloneDefaultSystemCategories,
+  cloneDefaultBootstrapCategories,
   cloneDefaultWorkspaces,
 } from './default-data';
 import { RestoreError } from './restore-errors';
@@ -22,6 +22,11 @@ import {
   type PersistedStoreKey,
 } from './store-manifest';
 import { readCompleteStoreSet, validateCompleteStoreSet } from './store-state';
+import {
+  instantiateDefaultCategoryTemplate,
+  type CategoryTemplateIdFactory,
+} from '../default-category-template';
+import { replaceWorkspaceRecords, selectWorkspaceRecords } from './workspace-scope';
 
 export const DATA_RESET_OPERATIONS = [
   'clear_activity',
@@ -41,6 +46,9 @@ export type DataResetPreview = {
   customSubcategoryCount: number;
   replacedStores: PersistedStoreKey[];
   preservedStores: PersistedStoreKey[];
+  workspaceId?: string;
+  workspaceName?: string;
+  workspaceMode: 'selected' | 'all';
 };
 
 export type DataResetResult = {
@@ -56,6 +64,8 @@ export type DataResetOptions = {
   operationsDirectory?: string;
   now?: () => Date;
   hooks?: StoreReplacementTestHooks;
+  workspaceId?: string | null;
+  categoryIdFactory?: CategoryTemplateIdFactory;
 };
 
 type ResetDefinition = {
@@ -98,7 +108,7 @@ const readCurrentStoreSet = (dataDirectory?: string): CompleteStoreSet => {
 
 const canonicalDefaults = () => ({
   workspaces: cloneDefaultWorkspaces() as BackupRecord[],
-  categories: cloneDefaultSystemCategories() as BackupRecord[],
+  categories: cloneDefaultBootstrapCategories() as BackupRecord[],
 });
 
 const equalRecords = (left: BackupRecord[], right: BackupRecord[]) =>
@@ -106,38 +116,67 @@ const equalRecords = (left: BackupRecord[], right: BackupRecord[]) =>
 
 const validateCompleteState = (
   operation: DataResetOperation,
-  data: CompleteStoreSet
+  data: CompleteStoreSet,
+  workspaceId?: string
 ) => {
   validateCompleteStoreSet(data);
 
   const defaults = canonicalDefaults();
-  if ((operation === 'reset_financial' || operation === 'factory_reset') &&
-      !equalRecords(data.categories, defaults.categories)) {
-    throw new RestoreError('DATA_OPERATION_FAILURE', 'The resulting category taxonomy does not match canonical defaults.');
+  if (operation === 'reset_financial') {
+    const categories = selectWorkspaceRecords('categories', data.categories, workspaceId!);
+    const expected = instantiateDefaultCategoryTemplate(workspaceId!, {
+      categoryId: (key) => `shape-category-${key}`,
+      subcategoryId: (key, categoryKey) => `shape-subcategory-${categoryKey}-${key}`,
+    }) as BackupRecord[];
+    const shape = (records: BackupRecord[]) => records.map((category) => ({
+      name: category.name,
+      type: category.type,
+      order: category.order,
+      subcategories: (category.subcategories as BackupRecord[]).map((subcategory) => ({
+        name: subcategory.name,
+        order: subcategory.order,
+        flowType: subcategory.flowType,
+      })),
+    }));
+    if (JSON.stringify(shape(categories)) !== JSON.stringify(shape(expected))) {
+      throw new RestoreError('DATA_OPERATION_FAILURE', 'The resulting workspace taxonomy does not match the starter template.');
+    }
   }
-  if (operation === 'factory_reset' && !equalRecords(data.workspaces, defaults.workspaces)) {
-    throw new RestoreError('DATA_OPERATION_FAILURE', 'The factory-reset workspace does not match the canonical default.');
+  if (operation === 'factory_reset') {
+    if (!equalRecords(data.categories, defaults.categories)) {
+      throw new RestoreError('DATA_OPERATION_FAILURE', 'The resulting category taxonomy does not match canonical defaults.');
+    }
+    if (!equalRecords(data.workspaces, defaults.workspaces)) {
+      throw new RestoreError('DATA_OPERATION_FAILURE', 'The factory-reset workspace does not match the canonical default.');
+    }
   }
 };
 
 const buildResultingState = (
   operation: DataResetOperation,
-  current: CompleteStoreSet
+  current: CompleteStoreSet,
+  workspaceId: string | undefined,
+  categoryIdFactory?: CategoryTemplateIdFactory
 ): CompleteStoreSet => {
   const result = cloneStoreSet(current);
   const defaults = canonicalDefaults();
 
   if (operation === 'clear_activity') {
-    result.imports = [];
-    result.transactions = [];
+    result.imports = replaceWorkspaceRecords('imports', result.imports, [], workspaceId!);
+    result.transactions = replaceWorkspaceRecords('transactions', result.transactions, [], workspaceId!);
   } else if (operation === 'reset_financial') {
-    result.accounts = [];
-    result.categories = defaults.categories;
-    result.imports = [];
-    result.importTemplates = [];
-    result.budgets = [];
-    result.rules = [];
-    result.transactions = [];
+    result.accounts = replaceWorkspaceRecords('accounts', result.accounts, [], workspaceId!);
+    result.categories = replaceWorkspaceRecords(
+      'categories',
+      result.categories,
+      instantiateDefaultCategoryTemplate(workspaceId!, categoryIdFactory) as BackupRecord[],
+      workspaceId!
+    );
+    result.imports = replaceWorkspaceRecords('imports', result.imports, [], workspaceId!);
+    result.importTemplates = replaceWorkspaceRecords('importTemplates', result.importTemplates, [], workspaceId!);
+    result.budgets = replaceWorkspaceRecords('budgets', result.budgets, [], workspaceId!);
+    result.rules = replaceWorkspaceRecords('rules', result.rules, [], workspaceId!);
+    result.transactions = replaceWorkspaceRecords('transactions', result.transactions, [], workspaceId!);
   } else {
     result.workspaces = defaults.workspaces;
     result.accounts = [];
@@ -149,7 +188,7 @@ const buildResultingState = (
     result.transactions = [];
   }
 
-  validateCompleteState(operation, result);
+  validateCompleteState(operation, result, workspaceId);
   return result;
 };
 
@@ -157,21 +196,39 @@ const storeCounts = (data: CompleteStoreSet) => Object.fromEntries(
   PERSISTED_STORE_KEYS.map((key) => [key, data[key].length])
 ) as Record<PersistedStoreKey, number>;
 
+const workspaceStoreCounts = (data: CompleteStoreSet, workspaceId: string) => Object.fromEntries(
+  PERSISTED_STORE_KEYS.map((key) => [
+    key,
+    key === 'workspaces'
+      ? data.workspaces.filter((workspace) => workspace.id === workspaceId).length
+      : selectWorkspaceRecords(key, data[key], workspaceId).length,
+  ])
+) as Record<PersistedStoreKey, number>;
+
 const buildPreview = (
   operation: DataResetOperation,
   current: CompleteStoreSet,
-  resulting: CompleteStoreSet
+  resulting: CompleteStoreSet,
+  workspaceId?: string
 ): DataResetPreview => {
   const definition = RESET_DEFINITIONS[operation];
   const targetStores = DATA_SCOPE_DEFINITIONS[definition.backupScope].includedStores;
-  const currentCounts = storeCounts(current);
-  const resultingCounts = storeCounts(resulting);
+  const workspaceMode = operation === 'factory_reset' ? 'all' : 'selected';
+  const currentCounts = workspaceMode === 'all'
+    ? storeCounts(current)
+    : workspaceStoreCounts(current, workspaceId!);
+  const resultingCounts = workspaceMode === 'all'
+    ? storeCounts(resulting)
+    : workspaceStoreCounts(resulting, workspaceId!);
   const removedCounts = Object.fromEntries(PERSISTED_STORE_KEYS.map((key) => [
     key,
     Math.max(0, currentCounts[key] - resultingCounts[key]),
   ])) as Record<PersistedStoreKey, number>;
-  const customCategoryCount = current.categories.filter((category) => category.isSystem !== true).length;
-  const customSubcategoryCount = current.categories.reduce((count, category) =>
+  const relevantCategories = workspaceMode === 'all'
+    ? current.categories
+    : selectWorkspaceRecords('categories', current.categories, workspaceId!);
+  const customCategoryCount = relevantCategories.filter((category) => category.isSystem !== true).length;
+  const customSubcategoryCount = relevantCategories.reduce((count, category) =>
     count + (Array.isArray(category.subcategories)
       ? category.subcategories.filter((subcategory) =>
           typeof subcategory === 'object' && subcategory !== null && !Array.isArray(subcategory) &&
@@ -189,6 +246,11 @@ const buildPreview = (
     customSubcategoryCount,
     replacedStores: [...targetStores],
     preservedStores: PERSISTED_STORE_KEYS.filter((key) => !targetStores.includes(key)),
+    workspaceMode,
+    ...(workspaceMode === 'selected' ? {
+      workspaceId,
+      workspaceName: current.workspaces.find((workspace) => workspace.id === workspaceId)?.name as string,
+    } : {}),
   };
 };
 
@@ -201,13 +263,20 @@ const validateOperation = (operation: unknown): DataResetOperation => {
 
 export const previewDataReset = async (
   operationValue: unknown,
-  options: Pick<DataResetOptions, 'dataDirectory' | 'operationsDirectory'> = {}
+  options: DataResetOptions = {}
 ): Promise<DataResetPreview> => withDataLock(() => {
   const operation = validateOperation(operationValue);
   recoverPendingRestoresUnlocked(options);
   const current = readCurrentStoreSet(options.dataDirectory);
-  const resulting = buildResultingState(operation, current);
-  return buildPreview(operation, current, resulting);
+  const workspaceId = operation === 'factory_reset' ? undefined : options.workspaceId?.trim() || undefined;
+  if (operation !== 'factory_reset' && !workspaceId) {
+    throw new RestoreError('INVALID_OPERATION', 'Select a workspace before using this operation.');
+  }
+  if (workspaceId && !current.workspaces.some((workspace) => workspace.id === workspaceId)) {
+    throw new RestoreError('INVALID_OPERATION', 'The selected workspace no longer exists.');
+  }
+  const resulting = buildResultingState(operation, current, workspaceId, options.categoryIdFactory);
+  return buildPreview(operation, current, resulting, workspaceId);
 });
 
 export const executeDataReset = async (
@@ -222,7 +291,14 @@ export const executeDataReset = async (
 
   recoverPendingRestoresUnlocked(options);
   const current = readCurrentStoreSet(options.dataDirectory);
-  const resulting = buildResultingState(operation, current);
+  const workspaceId = operation === 'factory_reset' ? undefined : options.workspaceId?.trim() || undefined;
+  if (operation !== 'factory_reset' && !workspaceId) {
+    throw new RestoreError('INVALID_OPERATION', 'Select a workspace before using this operation.');
+  }
+  if (workspaceId && !current.workspaces.some((workspace) => workspace.id === workspaceId)) {
+    throw new RestoreError('INVALID_OPERATION', 'The selected workspace no longer exists.');
+  }
+  const resulting = buildResultingState(operation, current, workspaceId, options.categoryIdFactory);
   const definition = RESET_DEFINITIONS[operation];
   const targetStores = DATA_SCOPE_DEFINITIONS[definition.backupScope].includedStores;
   const replacement = replaceStoreSetUnlocked(resulting, getDataManagementPaths(options), {
@@ -240,7 +316,9 @@ export const executeDataReset = async (
     completed: true,
     operation,
     replacedStores: replacement.replacedStores,
-    resultingCounts: storeCounts(resulting),
+    resultingCounts: operation === 'factory_reset'
+      ? storeCounts(resulting)
+      : workspaceStoreCounts(resulting, workspaceId!),
     cleanupWarning: replacement.cleanupWarning,
   };
 });

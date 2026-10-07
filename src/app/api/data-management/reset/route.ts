@@ -6,8 +6,9 @@ export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { operation?: unknown; confirmed?: unknown };
-    const result = await executeDataReset(body?.operation, body?.confirmed === true);
+    const body = await request.json() as { operation?: unknown; confirmed?: unknown; workspaceId?: unknown };
+    const workspaceId = typeof body?.workspaceId === 'string' ? body.workspaceId : undefined;
+    const result = await executeDataReset(body?.operation, body?.confirmed === true, { workspaceId });
     return NextResponse.json({ ok: true, result }, {
       headers: { 'Cache-Control': 'no-store' },
     });

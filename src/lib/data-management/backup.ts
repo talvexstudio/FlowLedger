@@ -12,8 +12,9 @@ import {
   FLOWLEDGER_VERSION,
   MINIMUM_COMPATIBLE_FLOWLEDGER_VERSION,
 } from './version';
-import { readCanonicalStoreRecords } from '../services/json-store';
 import { recoverPendingRestoresUnlocked } from './restore-recovery';
+import { readCompleteStoreSet } from './store-state';
+import { selectWorkspaceRecords } from './workspace-scope';
 
 type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
@@ -33,20 +34,29 @@ export type FlowLedgerBackup = {
   minimumCompatibleFlowLedgerVersion: string;
   createdAt: string;
   scope: BackupScope;
-  workspaceSelection: {
-    mode: 'all';
-    ids: string[];
-  };
+  workspaceSelection: BackupWorkspaceSelection;
   containsSensitiveFinancialData: true;
   includedStores: PersistedStoreKey[];
   storeManifest: BackupStoreManifestEntry[];
   data: Partial<Record<PersistedStoreKey, BackupRecord[]>>;
 };
 
+export type BackupWorkspaceSelection = {
+  mode: 'all';
+  ids: string[];
+} | {
+  mode: 'selected';
+  ids: [string];
+  sourceWorkspaceId: string;
+  sourceWorkspaceName: string;
+  sourceWorkspaceBaseCurrency: string;
+};
+
 export type CreateBackupOptions = {
   dataDirectory?: string;
   operationsDirectory?: string;
   now?: () => Date;
+  workspaceId?: string | null;
 };
 
 export class BackupExportError extends Error {
@@ -114,6 +124,28 @@ export const createBackup = async (
       });
     }
     const includedStores = [...BACKUP_SCOPE_STORES[scope]];
+    const workspaceScoped = scope !== 'everything';
+    const selectedWorkspaceId = options.workspaceId?.trim() || null;
+    if (workspaceScoped && !selectedWorkspaceId) {
+      throw new BackupExportError('Select a workspace before exporting this backup scope.');
+    }
+
+    let completeState;
+    try {
+      completeState = readCompleteStoreSet(options.dataDirectory);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'persisted data is unreadable or inconsistent';
+      throw new BackupExportError(`Cannot export because ${detail}.`, {
+        cause: error,
+      });
+    }
+    const selectedWorkspace = selectedWorkspaceId
+      ? completeState.workspaces.find((workspace) => workspace.id === selectedWorkspaceId)
+      : undefined;
+    if (workspaceScoped && !selectedWorkspace) {
+      throw new BackupExportError('The selected workspace no longer exists.');
+    }
+
     const data: Partial<Record<PersistedStoreKey, BackupRecord[]>> = {};
     const storeManifest: BackupStoreManifestEntry[] = [];
 
@@ -121,10 +153,7 @@ export const createBackup = async (
       const definition = PERSISTED_STORES[key];
       let rawRecords: Record<string, unknown>[];
       try {
-        rawRecords = readCanonicalStoreRecords(key, {
-          dataDirectory: options.dataDirectory,
-          allowMissing: false,
-        });
+        rawRecords = completeState[key];
         definition.validate(rawRecords);
       } catch (error) {
         throw new BackupExportError(`Cannot export ${definition.filename}: the store is unreadable or invalid.`, {
@@ -132,7 +161,10 @@ export const createBackup = async (
         });
       }
 
-      const records = canonicalizeStoreRecords(rawRecords);
+      const scopedRecords = workspaceScoped
+        ? selectWorkspaceRecords(key, rawRecords as BackupRecord[], selectedWorkspaceId!)
+        : rawRecords;
+      const records = canonicalizeStoreRecords(scopedRecords);
       data[key] = records;
       storeManifest.push({
         key,
@@ -149,7 +181,15 @@ export const createBackup = async (
       minimumCompatibleFlowLedgerVersion: MINIMUM_COMPATIBLE_FLOWLEDGER_VERSION,
       createdAt: (options.now ?? (() => new Date()))().toISOString(),
       scope,
-      workspaceSelection: { mode: 'all', ids: collectWorkspaceIds(data) },
+      workspaceSelection: workspaceScoped
+        ? {
+            mode: 'selected',
+            ids: [selectedWorkspaceId!],
+            sourceWorkspaceId: selectedWorkspaceId!,
+            sourceWorkspaceName: selectedWorkspace!.name as string,
+            sourceWorkspaceBaseCurrency: selectedWorkspace!.baseCurrency as string,
+          }
+        : { mode: 'all', ids: collectWorkspaceIds(data) },
       containsSensitiveFinancialData: true,
       includedStores,
       storeManifest,

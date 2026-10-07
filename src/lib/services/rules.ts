@@ -1,6 +1,10 @@
 import { db } from "./firestore";
 import type { Category, ClassificationRule, Subcategory, Transaction } from "../types";
 import { normalizeTransactionTypeFields } from '../internal-transfer';
+import { requireAccount } from './accounts';
+import { getCategories } from './categories';
+import { validateCategorySelection } from '../category-ownership';
+import { assertWorkspaceDocumentExists, assertWorkspaceExists } from './workspace-integrity';
 
 const rulesCollection = (workspaceId: string) => `workspaces/${workspaceId}/rules`;
 
@@ -16,21 +20,39 @@ export const saveRule = async (
   workspaceId: string,
   data: ClassificationRule | Omit<ClassificationRule, "id">
 ): Promise<ClassificationRule> => {
+  await assertWorkspaceExists(workspaceId);
+  if (data.match.accountId) {
+    await requireAccount(workspaceId, data.match.accountId);
+  }
+  if (data.action.categoryId || data.action.subcategoryId) {
+    validateCategorySelection(
+      await getCategories(workspaceId),
+      workspaceId,
+      data.action.categoryId,
+      data.action.subcategoryId
+    );
+  }
   const coll = db.collection(rulesCollection(workspaceId));
   if ("id" in data && data.id) {
-    const { id, ...payload } = data;
+    await assertWorkspaceDocumentExists(workspaceId, 'rules', data.id, 'Rule');
+    const { id, workspaceId: _workspaceId, ...ruleData } = data;
+    const payload = { ...ruleData, workspaceId };
     await coll.doc(id).set(payload, { merge: true });
     return { ...payload, id } as ClassificationRule;
   }
 
-  const docRef = await coll.add(data);
-  return { ...(data as Omit<ClassificationRule, "id">), id: docRef.id };
+  const { workspaceId: _workspaceId, ...ruleData } = data;
+  const payload = { ...ruleData, workspaceId } as Omit<ClassificationRule, 'id'>;
+  const docRef = await coll.add(payload);
+  return { ...payload, id: docRef.id };
 };
 
 export const deleteRule = async (
   workspaceId: string,
   ruleId: string
 ): Promise<void> => {
+  await assertWorkspaceExists(workspaceId);
+  await assertWorkspaceDocumentExists(workspaceId, 'rules', ruleId, 'Rule');
   await db.collection(rulesCollection(workspaceId)).doc(ruleId).delete();
 };
 
@@ -44,6 +66,7 @@ export const applyRulesToTransaction = (
   const amount = Math.abs(tx.amountBase ?? 0);
 
   for (const rule of rules) {
+    if (tx.workspaceId && rule.workspaceId !== tx.workspaceId) continue;
     const m = rule.match;
 
     if (m.descriptionContains && !desc.includes(m.descriptionContains.toLowerCase())) {
@@ -121,6 +144,7 @@ export const ruleMatchesTransactionForBackfill = (
   tx: Transaction,
   similarityThreshold: number = 0.6
 ): boolean => {
+  if (rule.workspaceId !== tx.workspaceId) return false;
   if (rule.match.accountId && rule.match.accountId !== tx.accountId) {
     return false;
   }
@@ -140,6 +164,9 @@ export const applyRuleClassificationToTransaction = (
   rule: ClassificationRule,
   categories: (Category & { subcategories: Subcategory[] })[]
 ): Partial<Transaction> => {
+  if (rule.workspaceId !== tx.workspaceId) {
+    throw new Error('A classification rule cannot be applied across workspaces.');
+  }
   const updated: Partial<Transaction> = { id: tx.id };
 
   if (rule.action.categoryId) {

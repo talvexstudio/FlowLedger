@@ -64,7 +64,7 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
   };
   const requiresTransferDetails = (transaction: Transaction) =>
     transaction.type === 'InternalTransfer' &&
-    !validateInternalTransfer(transaction, accounts, workspaceId).valid;
+    (!workspaceId || !validateInternalTransfer(transaction, accounts, workspaceId).valid);
   
   const handleApprove = async (transactionId: string) => {
     if (!workspaceId) return;
@@ -179,6 +179,12 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
       });
     }
   };
+
+  useEffect(() => {
+    setEditingTransaction(null);
+    setBackfillCandidates([]);
+    setPendingRule(null);
+  }, [workspaceId]);
 
   useEffect(() => {
     if (pendingRule && backfillCandidates.length > 0 && backfillPanelRef.current) {

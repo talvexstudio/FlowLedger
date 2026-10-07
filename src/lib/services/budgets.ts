@@ -1,8 +1,33 @@
 import { db } from './firestore';
 import type { Budget, BudgetLine } from '../types';
+import { getCategories } from './categories';
+import { validateCategorySelection } from '../category-ownership';
+import { assertWorkspaceExists } from './workspace-integrity';
 
 const budgetsCollection = (workspaceId: string) =>
   db.collection(`workspaces/${workspaceId}/budgets`);
+
+const budgetCreationQueues = new Map<string, Promise<void>>();
+
+const withBudgetCreationLock = async <T>(
+  workspaceId: string,
+  year: number,
+  operation: () => Promise<T>
+): Promise<T> => {
+  const key = `${workspaceId}:${year}`;
+  const previous = budgetCreationQueues.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  const tail = previous.then(() => current);
+  budgetCreationQueues.set(key, tail);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (budgetCreationQueues.get(key) === tail) budgetCreationQueues.delete(key);
+  }
+};
 
 type StoredBudgetLine = Partial<BudgetLine> & {
   recordType: 'line';
@@ -13,12 +38,20 @@ type StoredBudgetLine = Partial<BudgetLine> & {
 
 const isBudgetLine = (data: any): data is StoredBudgetLine => data?.recordType === 'line';
 
-const findBudgetDocument = async (workspaceId: string, year: number) => {
+const findBudgetDocuments = async (workspaceId: string, year: number) => {
   const snapshot = await budgetsCollection(workspaceId).get();
-  return snapshot.docs.find((doc: any) => {
+  return snapshot.docs.filter((doc: any) => {
     const data = doc.data();
     return !isBudgetLine(data) && data?.year === year;
   });
+};
+
+const findBudgetDocument = async (workspaceId: string, year: number) => {
+  const matches = await findBudgetDocuments(workspaceId, year);
+  if (matches.length > 1) {
+    throw new Error('More than one budget exists for this workspace and year.');
+  }
+  return matches[0];
 };
 
 const findBudgetLineDocument = async (
@@ -38,10 +71,14 @@ export const getBudget = async (
   year: number
 ): Promise<{ budget: Budget | null; lines: BudgetLine[] }> => {
   const snapshot = await budgetsCollection(workspaceId).get();
-  const budgetDoc = snapshot.docs.find((doc: any) => {
+  const budgetDocs = snapshot.docs.filter((doc: any) => {
     const data = doc.data();
     return !isBudgetLine(data) && data?.year === year;
   });
+  if (budgetDocs.length > 1) {
+    throw new Error('More than one budget exists for this workspace and year.');
+  }
+  const budgetDoc = budgetDocs[0];
 
   if (!budgetDoc) return { budget: null, lines: [] };
 
@@ -60,19 +97,24 @@ export const getBudget = async (
 };
 
 export const ensureBudget = async (workspaceId: string, year: number): Promise<Budget> => {
-  const existing = await findBudgetDocument(workspaceId, year);
-  if (existing) return { id: existing.id, ...existing.data() } as Budget;
+  await assertWorkspaceExists(workspaceId);
+  return withBudgetCreationLock(workspaceId, year, async () => {
+    const existing = await findBudgetDocument(workspaceId, year);
+    if (existing) return { id: existing.id, ...existing.data() } as Budget;
 
-  const budgetData: Omit<Budget, 'id'> = {
-    workspaceId,
-    year,
-    createdFromSampleMonths: 3,
-    samplePeriodFrom: `${year}-01`,
-    samplePeriodTo: `${year}-12`,
-    createdAt: new Date(),
-  };
-  const docRef = await budgetsCollection(workspaceId).add(budgetData);
-  return { id: docRef.id, ...budgetData };
+    const budgetData: Omit<Budget, 'id'> = {
+      workspaceId,
+      year,
+      createdFromSampleMonths: 3,
+      samplePeriodFrom: `${year}-01`,
+      samplePeriodTo: `${year}-12`,
+      createdAt: new Date(),
+    };
+    // New budget headers use the store's globally unique generated ID. Legacy
+    // headers whose ID is the year remain readable through the workspace+year lookup.
+    const docRef = await budgetsCollection(workspaceId).add(budgetData);
+    return { id: docRef.id, ...budgetData };
+  });
 };
 
 export const saveBudgetLine = async (
@@ -80,6 +122,13 @@ export const saveBudgetLine = async (
   year: number,
   line: Partial<BudgetLine>
 ): Promise<BudgetLine> => {
+  await assertWorkspaceExists(workspaceId);
+  validateCategorySelection(
+    await getCategories(workspaceId),
+    workspaceId,
+    line.categoryId,
+    line.subcategoryId
+  );
   const budget = await ensureBudget(workspaceId, year);
   const categoryId = line.categoryId!;
   const existing = await findBudgetLineDocument(workspaceId, year, categoryId);
@@ -106,6 +155,7 @@ export const deleteBudgetLine = async (
   year: number,
   categoryId: string
 ): Promise<void> => {
+  await assertWorkspaceExists(workspaceId);
   const existing = await findBudgetLineDocument(workspaceId, year, categoryId);
   if (existing) {
     await budgetsCollection(workspaceId).doc(existing.id).delete();
