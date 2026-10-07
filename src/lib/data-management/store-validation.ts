@@ -93,6 +93,9 @@ export const STORE_VALIDATORS = {
   }),
   categories: (records: unknown[]) => validateEach('categories', records, (record, index) => {
     assertId('categories', record, index);
+    if (record.workspaceId !== undefined && record.workspaceId !== null) {
+      assertString('categories', record, index, 'workspaceId');
+    }
     assertString('categories', record, index, 'name');
     assertEnum('categories', record, index, 'type', ['expense', 'income', 'both']);
     assertNumber('categories', record, index, 'order');
@@ -103,10 +106,26 @@ export const STORE_VALIDATORS = {
     record.subcategories.forEach((value, subIndex) => {
       const sub = assertRecord('categories.subcategories', value, subIndex);
       assertId('categories.subcategories', sub, subIndex);
+      if (sub.workspaceId !== undefined && sub.workspaceId !== null) {
+        assertString('categories.subcategories', sub, subIndex, 'workspaceId');
+      }
       assertString('categories.subcategories', sub, subIndex, 'categoryId');
       assertString('categories.subcategories', sub, subIndex, 'name');
       assertNumber('categories.subcategories', sub, subIndex, 'order');
       assertBoolean('categories.subcategories', sub, subIndex, 'isSystem');
+      const effectiveCategoryWorkspaceId = typeof record.workspaceId === 'string'
+        ? record.workspaceId
+        : 'ws1';
+      const effectiveSubcategoryWorkspaceId = typeof sub.workspaceId === 'string'
+        ? sub.workspaceId
+        : effectiveCategoryWorkspaceId;
+      if (effectiveSubcategoryWorkspaceId !== effectiveCategoryWorkspaceId) {
+        throw new StoreValidationError(
+          'categories.subcategories',
+          subIndex,
+          'workspaceId must match the parent category workspaceId'
+        );
+      }
     });
   }),
   imports: (records: unknown[]) => validateEach('imports', records, (record, index) => {

@@ -1,80 +1,143 @@
-import { db } from "./firestore";
-import type { Category, Subcategory } from "../types";
+import { randomUUID } from 'node:crypto';
+import {
+  categoryBelongsToWorkspace,
+  normalizeRuntimeCategory,
+  type PersistedCategory,
+  type RuntimeCategory,
+} from '../category-ownership';
+import type { Category, Subcategory } from '../types';
+import { db } from './firestore';
 
-const normalizeCategory = (category: Category & { subcategories?: Subcategory[] }) => {
-    const defaultFlowType: Subcategory["flowType"] =
-        category.type === "income" ? "Income" : "Expense";
+const categoriesCollection = () => db.collection('categories');
 
-    return {
-        ...category,
-        isActive: category.isActive !== false,
-        subcategories: (category.subcategories || []).map(sub => ({
-            ...sub,
-            isActive: sub.isActive !== false,
-            flowType: sub.flowType ?? defaultFlowType,
-        })),
-    };
+const requireWorkspace = async (workspaceId: string) => {
+  if (!workspaceId) throw new Error('workspaceId is required.');
+  const workspace = await db.collection('workspaces').doc(workspaceId).get();
+  if (!workspace.exists) throw new Error('Workspace not found.');
 };
 
-export const getCategories = async (): Promise<(Category & { subcategories: Subcategory[] })[]> => {
-    const snapshot = await db.collection("categories").get();
-    return snapshot.docs.map(doc => {
-        const data = doc.data() as Category & { subcategories?: Subcategory[] };
-        return normalizeCategory({ ...data, id: doc.id });
-    });
-}
-
-export const saveCategory = async (category: Category): Promise<Category> => {
-    const coll = db.collection("categories");
-    if (category.id) {
-        await coll.doc(category.id).set(category, { merge: true });
-        return category;
-    }
-
-    const docRef = await coll.add(category);
-    return { ...category, id: docRef.id };
-}
-
-const generateSubcategoryId = () => {
-    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-        return crypto.randomUUID();
-    }
-    return `sub_${Math.random().toString(36).slice(2, 10)}`;
+const getPersistedCategories = async (): Promise<PersistedCategory[]> => {
+  const snapshot = await categoriesCollection().get();
+  return snapshot.docs.map((doc) => ({ ...doc.data(), id: doc.id } as PersistedCategory));
 };
+
+export const getCategories = async (workspaceId: string): Promise<RuntimeCategory[]> => {
+  await requireWorkspace(workspaceId);
+  const categories = await getPersistedCategories();
+  return categories
+    .filter((category) => categoryBelongsToWorkspace(category, workspaceId))
+    .map(normalizeRuntimeCategory);
+};
+
+export const getCategory = async (
+  workspaceId: string,
+  categoryId: string
+): Promise<RuntimeCategory | null> => {
+  await requireWorkspace(workspaceId);
+  const category = (await getPersistedCategories()).find((candidate) => candidate.id === categoryId);
+  if (!category || !categoryBelongsToWorkspace(category, workspaceId)) return null;
+  return normalizeRuntimeCategory(category);
+};
+
+type CategoryWrite = Omit<Category, 'id' | 'workspaceId'> & {
+  id?: string;
+  workspaceId?: string;
+  subcategories?: Subcategory[];
+};
+
+const normalizeSubcategoriesForWrite = (
+  workspaceId: string,
+  categoryId: string,
+  subcategories: Subcategory[] = []
+) => subcategories.map((subcategory) => {
+  if (subcategory.workspaceId && subcategory.workspaceId !== workspaceId) {
+    throw new Error('Subcategory does not belong to the selected workspace.');
+  }
+  if (subcategory.categoryId && subcategory.categoryId !== categoryId) {
+    throw new Error('Subcategory does not belong to the selected category.');
+  }
+  return { ...subcategory, workspaceId, categoryId };
+});
+
+export const saveCategory = async (
+  workspaceId: string,
+  category: CategoryWrite
+): Promise<RuntimeCategory> => {
+  await requireWorkspace(workspaceId);
+  if (category.workspaceId && category.workspaceId !== workspaceId) {
+    throw new Error('Category does not belong to the selected workspace.');
+  }
+  const coll = categoriesCollection();
+  if (category.id) {
+    const existing = await getCategory(workspaceId, category.id);
+    if (!existing) throw new Error('Category not found in the selected workspace.');
+    const { id, ...incoming } = category;
+    const subcategories = incoming.subcategories
+      ? normalizeSubcategoriesForWrite(workspaceId, id, incoming.subcategories)
+      : existing.subcategories;
+    const persisted = { ...incoming, workspaceId, subcategories };
+    await coll.doc(id).set(persisted, { merge: true });
+    return normalizeRuntimeCategory({ ...existing, ...persisted, id });
+  }
+
+  const { id: _id, ...incoming } = category;
+  const docRef = await coll.add({ ...incoming, workspaceId, subcategories: [] });
+  return normalizeRuntimeCategory({
+    ...incoming,
+    id: docRef.id,
+    workspaceId,
+    subcategories: [],
+  });
+};
+
+const newSubcategoryId = () => `sub_${randomUUID()}`;
 
 export const saveSubcategory = async (
-    categoryId: string,
-    subcategory: Subcategory
+  workspaceId: string,
+  categoryId: string,
+  subcategory: Omit<Subcategory, 'workspaceId'> & { workspaceId?: string }
 ): Promise<Subcategory> => {
-    const coll = db.collection("categories");
-    const catDoc = await coll.doc(categoryId).get();
-    const catData = catDoc.data() as Category & { subcategories?: Subcategory[] } | undefined;
-    if (!catData) {
-        throw new Error("Category not found.");
-    }
+  const category = await getCategory(workspaceId, categoryId);
+  if (!category) throw new Error('Category not found in the selected workspace.');
+  if (subcategory.workspaceId && subcategory.workspaceId !== workspaceId) {
+    throw new Error('Subcategory does not belong to the selected workspace.');
+  }
+  if (subcategory.categoryId && subcategory.categoryId !== categoryId) {
+    throw new Error('Subcategory does not belong to the selected category.');
+  }
 
-    const normalizedSubcategory = { ...subcategory, categoryId };
-    const subs = [...(catData.subcategories || [])];
-    const existingIndex = normalizedSubcategory.id
-        ? subs.findIndex(s => s.id === normalizedSubcategory.id)
-        : -1;
+  const existingIndex = category.subcategories.findIndex(
+    (candidate) => candidate.id === subcategory.id
+  );
+  const id = existingIndex >= 0 ? subcategory.id : newSubcategoryId();
+  const normalized: Subcategory = { ...subcategory, id, workspaceId, categoryId };
+  const subcategories = [...category.subcategories];
+  if (existingIndex >= 0) subcategories[existingIndex] = normalized;
+  else subcategories.push(normalized);
 
-    if (existingIndex >= 0) {
-        subs[existingIndex] = normalizedSubcategory;
-    } else {
-        const newId = normalizedSubcategory.id && !normalizedSubcategory.id.startsWith("temp-")
-            ? normalizedSubcategory.id
-            : generateSubcategoryId();
-        subs.push({ ...normalizedSubcategory, id: newId });
-    }
+  await categoriesCollection().doc(categoryId).set(
+    { workspaceId, subcategories },
+    { merge: true }
+  );
+  return normalized;
+};
 
-    await coll.doc(categoryId).set(
-        {
-            ...catData,
-            subcategories: subs,
-        },
-        { merge: true }
-    );
+const categoryReferenceExists = async (workspaceId: string, categoryId: string) => {
+  for (const collectionName of ['transactions', 'rules', 'budgets'] as const) {
+    const snapshot = await db.collection(`workspaces/${workspaceId}/${collectionName}`).get();
+    if (snapshot.docs.some((doc) => {
+      const data = doc.data();
+      return data.categoryId === categoryId || data.action?.categoryId === categoryId;
+    })) return true;
+  }
+  return false;
+};
 
-    return normalizedSubcategory;
-}
+export const deleteCategory = async (workspaceId: string, categoryId: string): Promise<void> => {
+  const existing = await getCategory(workspaceId, categoryId);
+  if (!existing) throw new Error('Category not found in the selected workspace.');
+  if (await categoryReferenceExists(workspaceId, categoryId)) {
+    throw new Error('This category is in use and cannot be deleted.');
+  }
+  await categoriesCollection().doc(categoryId).delete();
+};

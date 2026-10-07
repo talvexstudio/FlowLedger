@@ -12,7 +12,9 @@ export const mockAccounts: Account[] = [
   { id: 'acc3', workspaceId: 'ws1', name: 'Visa Card', type: 'credit_card', currency: 'EUR', institution: 'Millennium BCP', openingBalance: 0, archived: false, createdAt: new Date(), updatedAt: new Date() },
 ];
 
-export const mockCategories: (Category & { subcategories: Subcategory[] })[] = [
+const mockCategoryDefinitions: (Omit<Category, 'workspaceId'> & {
+  subcategories: Omit<Subcategory, 'workspaceId'>[];
+})[] = [
     {
         id: 'cat_housing', name: 'Housing', type: 'expense', order: 1, isSystem: true,
         subcategories: [
@@ -80,6 +82,16 @@ export const mockCategories: (Category & { subcategories: Subcategory[] })[] = [
         ]
     }
 ];
+
+export const mockCategories: (Category & { subcategories: Subcategory[] })[] =
+  mockCategoryDefinitions.map((category) => ({
+    ...category,
+    workspaceId: 'ws1',
+    subcategories: category.subcategories.map((subcategory) => ({
+      ...subcategory,
+      workspaceId: 'ws1',
+    })),
+  }));
 
 export const mockTransactions: Transaction[] = [
   {

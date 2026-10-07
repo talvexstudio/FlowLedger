@@ -16,7 +16,6 @@ import type { Category, Subcategory } from '@/lib/types';
 type EditableCategory = Category & { subcategories: Subcategory[] };
 
 const createTempId = () => `temp-${Math.random().toString(36).slice(2, 10)}`;
-const generateCategoryId = () => `cat_${Math.random().toString(36).slice(2, 10)}`;
 
 const normalizeCategories = (categories: EditableCategory[]) => {
   return categories.map(category => ({
@@ -32,7 +31,7 @@ const normalizeCategories = (categories: EditableCategory[]) => {
 
 export function CategoriesPanel() {
   const { toast } = useToast();
-  const { categories, reloadCategories } = useFlowLedger();
+  const { workspaceId, categories, reloadCategories } = useFlowLedger();
   const [editableCategories, setEditableCategories] = React.useState<EditableCategory[]>([]);
   const [expandedCategoryIds, setExpandedCategoryIds] = React.useState<Set<string>>(new Set());
   const [showAddForm, setShowAddForm] = React.useState(false);
@@ -97,6 +96,7 @@ export function CategoriesPanel() {
         ...cat.subcategories,
         {
           id: createTempId(),
+          workspaceId: cat.workspaceId,
           categoryId: cat.id,
           name: 'New subcategory',
           order: (cat.subcategories?.length || 0) + 1,
@@ -137,8 +137,9 @@ export function CategoriesPanel() {
 
     setIsAddingCategory(true);
     try {
-      const newCategory: Category = {
-        id: generateCategoryId(),
+      if (!workspaceId) throw new Error('No workspace is selected.');
+      const newCategory: Omit<Category, 'id'> = {
+        workspaceId,
         name: trimmedName,
         type: newCategoryType,
         order: editableCategories.length + 1,
@@ -146,7 +147,7 @@ export function CategoriesPanel() {
         isCustom: true,
         isActive: true,
       };
-      await apiSaveCategory(newCategory);
+      await apiSaveCategory(workspaceId, newCategory);
       await reloadCategories();
       setNewCategoryName('');
       setNewCategoryType('expense');
@@ -165,11 +166,12 @@ export function CategoriesPanel() {
     const requestCount = changes.categories.length + changes.subcategories.length;
     setIsSaving(true);
     try {
+      if (!workspaceId) throw new Error('No workspace is selected.');
       for (const category of changes.categories) {
-        await apiSaveCategory(category);
+        await apiSaveCategory(workspaceId, category);
       }
       for (const subcategory of changes.subcategories) {
-        await apiSaveSubcategory(subcategory.categoryId, subcategory.data);
+        await apiSaveSubcategory(workspaceId, subcategory.categoryId, subcategory.data);
       }
       await reloadCategories();
       toast({
@@ -253,12 +255,7 @@ export function CategoriesPanel() {
                         value={category.name}
                         onChange={(e) => handleCategoryNameChange(category.id, e.target.value)}
                         className="max-w-xs"
-                        readOnly={category.isSystem}
-                        disabled={category.isSystem}
                       />
-                      {category.isSystem && (
-                        <span className="text-xs text-muted-foreground whitespace-nowrap">System</span>
-                      )}
                     </div>
                     <div className="flex items-center gap-3">
                       <button

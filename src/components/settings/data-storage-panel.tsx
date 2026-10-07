@@ -408,7 +408,7 @@ export function DataStoragePanel() {
                   <>
                     <p>{formatCount(resetPreview.currentCounts.accounts, 'account')}, {formatCount(resetPreview.currentCounts.transactions, 'transaction')}, and {formatCount(resetPreview.currentCounts.imports, 'import')} will be removed.</p>
                     <p>{formatCount(resetPreview.currentCounts.importTemplates, 'import template')}, {formatCount(resetPreview.currentCounts.budgets, 'budget record')}, and {formatCount(resetPreview.currentCounts.rules, 'rule')} will be removed.</p>
-                    <p>{formatCount(resetPreview.customCategoryCount, 'custom category', 'custom categories')} and {formatCount(resetPreview.customSubcategoryCount, 'custom subcategory', 'custom subcategories')} will be removed; system defaults will be restored.</p>
+                    <p>{formatCount(resetPreview.customCategoryCount, 'custom category', 'custom categories')} and {formatCount(resetPreview.customSubcategoryCount, 'custom subcategory', 'custom subcategories')} will be removed; starter categories will be restored.</p>
                     <p>{formatCount(resetPreview.currentCounts.workspaces, 'workspace')} will be preserved.</p>
                   </>
                 )}

@@ -18,13 +18,13 @@ export const RESET_OPTIONS: Record<DataResetOperation, {
   },
   reset_financial: {
     title: 'Reset Financial Data',
-    description: 'Remove accounts and all financial activity and configuration, reset categories to system defaults, and keep workspaces.',
+    description: 'Remove accounts and all financial activity and configuration, reset categories to the starter set, and keep workspaces.',
     confirmation: 'I understand that all financial data will be removed while workspaces are preserved.',
     action: 'Reset financial data',
   },
   factory_reset: {
     title: 'Factory Reset',
-    description: 'Remove all local FlowLedger data and return to the default workspace and system categories.',
+    description: 'Remove all local FlowLedger data and return to the default workspace and starter categories.',
     confirmation: 'I understand that all FlowLedger data will be replaced with the default local setup.',
     action: 'Factory reset',
   },

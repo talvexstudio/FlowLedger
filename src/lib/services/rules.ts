@@ -2,6 +2,8 @@ import { db } from "./firestore";
 import type { Category, ClassificationRule, Subcategory, Transaction } from "../types";
 import { normalizeTransactionTypeFields } from '../internal-transfer';
 import { requireAccount } from './accounts';
+import { getCategories } from './categories';
+import { validateCategorySelection } from '../category-ownership';
 
 const rulesCollection = (workspaceId: string) => `workspaces/${workspaceId}/rules`;
 
@@ -20,8 +22,14 @@ export const saveRule = async (
   if (data.match.accountId) {
     await requireAccount(workspaceId, data.match.accountId);
   }
-  // Category ownership remains intentionally global until workspace-owned
-  // categories are introduced in Workspace Phase 3.
+  if (data.action.categoryId || data.action.subcategoryId) {
+    validateCategorySelection(
+      await getCategories(workspaceId),
+      workspaceId,
+      data.action.categoryId,
+      data.action.subcategoryId
+    );
+  }
   const coll = db.collection(rulesCollection(workspaceId));
   if ("id" in data && data.id) {
     const { id, ...payload } = data;

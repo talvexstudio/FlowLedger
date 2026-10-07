@@ -112,13 +112,25 @@ const validateCategoryReference = (
   record: BackupRecord,
   label: string,
   categories: Map<string, BackupRecord>,
-  subcategoryParents: Map<string, string>
+  subcategoryParents: Map<string, { categoryId: string; workspaceId: string }>,
+  workspaceId: string | undefined
 ) => {
   const categoryId = optionalString(record, 'categoryId');
   const subcategoryId = optionalString(record, 'subcategoryId');
   requireReference(categories, categoryId, `${label} references a missing category.`);
+  if (categoryId && effectiveCategoryWorkspaceId(categories.get(categoryId)!) !== workspaceId) {
+    throw new RestoreError(
+      'REFERENTIAL_INTEGRITY_FAILURE',
+      `${label} category belongs to a different workspace.`
+    );
+  }
   if (subcategoryId) {
-    if (!categoryId || subcategoryParents.get(subcategoryId) !== categoryId) {
+    const parent = subcategoryParents.get(subcategoryId);
+    if (
+      !categoryId ||
+      parent?.categoryId !== categoryId ||
+      parent?.workspaceId !== workspaceId
+    ) {
       throw new RestoreError(
         'REFERENTIAL_INTEGRITY_FAILURE',
         `${label} has a subcategory that does not belong to its category.`
@@ -126,6 +138,9 @@ const validateCategoryReference = (
     }
   }
 };
+
+const effectiveCategoryWorkspaceId = (category: BackupRecord) =>
+  optionalString(category, 'workspaceId') ?? 'ws1';
 
 const validateLinkedPair = (
   source: BackupRecord,
@@ -168,18 +183,32 @@ export const validateRestoreReferences = (
   void importTemplates;
   void rules;
 
-  const subcategoryParents = new Map<string, string>();
+  const subcategoryParents = new Map<string, { categoryId: string; workspaceId: string }>();
   for (const category of categories.values()) {
     const categoryId = recordId(category);
+    const categoryWorkspaceId = effectiveCategoryWorkspaceId(category);
+    requireReference(
+      workspaces,
+      categoryWorkspaceId,
+      'A category references a missing workspace.'
+    );
     for (const value of category.subcategories as BackupRecord[]) {
       const subcategoryId = recordId(value);
-      if (subcategoryParents.has(subcategoryId) || value.categoryId !== categoryId) {
+      const subcategoryWorkspaceId = optionalString(value, 'workspaceId') ?? categoryWorkspaceId;
+      if (
+        subcategoryParents.has(subcategoryId) ||
+        value.categoryId !== categoryId ||
+        subcategoryWorkspaceId !== categoryWorkspaceId
+      ) {
         throw new RestoreError(
           'REFERENTIAL_INTEGRITY_FAILURE',
           'The category taxonomy contains an invalid or duplicate subcategory relationship.'
         );
       }
-      subcategoryParents.set(subcategoryId, categoryId);
+      subcategoryParents.set(subcategoryId, {
+        categoryId,
+        workspaceId: categoryWorkspaceId,
+      });
     }
   }
 
@@ -217,7 +246,7 @@ export const validateRestoreReferences = (
     if (accountId && accounts.get(accountId)?.workspaceId !== workspaceId) {
       throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'A rule account belongs to a different workspace.');
     }
-    validateCategoryReference(action, 'A rule', categories, subcategoryParents);
+    validateCategoryReference(action, 'A rule', categories, subcategoryParents, workspaceId);
   }
 
   const budgetHeaders = new Map(
@@ -235,7 +264,7 @@ export const validateRestoreReferences = (
       if (headerId && budgetHeaders.get(headerId)?.workspaceId !== workspaceId) {
         throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'A budget line belongs to a different workspace than its header.');
       }
-      validateCategoryReference(budget, 'A budget line', categories, subcategoryParents);
+      validateCategoryReference(budget, 'A budget line', categories, subcategoryParents, workspaceId);
     } else {
       const budgetYearKey = `${workspaceId ?? ''}:${String(budget.year)}`;
       if (budgetYears.has(budgetYearKey)) {
@@ -273,7 +302,7 @@ export const validateRestoreReferences = (
     if (importId && imports.get(importId)?.workspaceId !== workspaceId) {
       throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'A transaction import belongs to a different workspace.');
     }
-    validateCategoryReference(transaction, 'A transaction', categories, subcategoryParents);
+    validateCategoryReference(transaction, 'A transaction', categories, subcategoryParents, workspaceId);
 
     if (linkedTransactionId) {
       if (linkedTransactionId === transactionId) {

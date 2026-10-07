@@ -266,8 +266,8 @@ test('backup read waits for and captures one coherent locked snapshot', async ()
   );
 });
 
-test('authoritative defaults contain ws1 and the complete system-only taxonomy', () => {
-  assert.equal(DEFAULT_DATA_VERSION, 1);
+test('authoritative defaults contain ws1 and its complete editable starter taxonomy', () => {
+  assert.equal(DEFAULT_DATA_VERSION, 2);
   assert.equal(DEFAULT_WORKSPACES.length, 1);
   assert.equal(DEFAULT_WORKSPACES[0].id, 'ws1');
   assert.equal(DEFAULT_SYSTEM_CATEGORIES.length, 17);
@@ -275,6 +275,8 @@ test('authoritative defaults contain ws1 and the complete system-only taxonomy',
   assert.equal(subcategories.length, 60);
   assert.ok(DEFAULT_SYSTEM_CATEGORIES.every((category) => category.isSystem === true));
   assert.ok(subcategories.every((subcategory) => subcategory.isSystem === true));
+  assert.ok(DEFAULT_SYSTEM_CATEGORIES.every((category) => category.workspaceId === 'ws1'));
+  assert.ok(subcategories.every((subcategory) => subcategory.workspaceId === 'ws1'));
   assert.equal(DEFAULT_SYSTEM_CATEGORIES.some((category) => category.isCustom === true), false);
   assert.equal(subcategories.some((subcategory) => subcategory.isCustom === true), false);
 });

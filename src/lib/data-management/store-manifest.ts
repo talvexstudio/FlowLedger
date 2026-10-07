@@ -1,5 +1,5 @@
 import {
-  cloneDefaultSystemCategories,
+  cloneDefaultBootstrapCategories,
   cloneDefaultWorkspaces,
   type PersistedRecord,
 } from './default-data';
@@ -94,8 +94,8 @@ export const PERSISTED_STORES: Record<PersistedStoreKey, PersistedStoreDefinitio
   },
   categories: {
     key: 'categories', collectionName: 'categories', filename: 'categories.json', schemaVersion: 1,
-    workspaceScoped: false, restoreOrder: 20, dependencies: [], requiredInScopes: ['financial_data', 'everything'],
-    validate: STORE_VALIDATORS.categories, defaultInitializer: cloneDefaultSystemCategories,
+    workspaceScoped: true, restoreOrder: 20, dependencies: ['workspaces'], requiredInScopes: ['financial_data', 'everything'],
+    validate: STORE_VALIDATORS.categories, defaultInitializer: cloneDefaultBootstrapCategories,
   },
   imports: {
     key: 'imports', collectionName: 'imports', filename: 'imports.json', schemaVersion: 1,

@@ -8,6 +8,7 @@ import type { Account, ClassificationRule } from './types';
 
 const baselineCategory: EditableCategory = {
   id: 'cat-a',
+  workspaceId: 'ws1',
   name: 'Category A',
   type: 'expense',
   order: 1,
@@ -15,6 +16,7 @@ const baselineCategory: EditableCategory = {
   isActive: true,
   subcategories: [{
     id: 'sub-a',
+    workspaceId: 'ws1',
     categoryId: 'cat-a',
     name: 'Subcategory A',
     order: 1,
@@ -37,8 +39,8 @@ test('category change set includes only the changed subcategory', () => {
 });
 
 test('category payload preserves domain type and subcategory payload uses authoritative parent id', () => {
-  const categoryRequest = buildCategorySaveRequest(baselineCategory);
-  const subcategoryRequest = buildSubcategorySaveRequest('cat-a', {
+  const categoryRequest = buildCategorySaveRequest('ws1', baselineCategory);
+  const subcategoryRequest = buildSubcategorySaveRequest('ws1', 'cat-a', {
     ...baselineCategory.subcategories[0],
     categoryId: 'stale-parent',
   });

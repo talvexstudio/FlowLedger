@@ -74,6 +74,7 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
   const setWorkspaceId = useCallback((id: string) => {
     if (!workspaces.some((workspace) => workspace.id === id)) return;
     persistWorkspaceId(getBrowserStorage(), id);
+    setCategories([]);
     setWorkspaceIdState(id);
   }, [workspaces]);
 
@@ -108,14 +109,18 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
   }, [workspaceId]);
 
   const fetchCategories = useCallback(async () => {
+    if (!workspaceId) {
+      setCategories([]);
+      return;
+    }
     try {
-      const data = await apiGetCategories();
+      const data = await apiGetCategories(workspaceId);
       setCategories(data);
     } catch (e) {
       console.error('Failed to load categories:', e);
       toastRef.current({ title: 'Failed to load categories', description: (e as Error).message, variant: 'destructive' });
     }
-  }, []);
+  }, [workspaceId]);
 
   const fetchBudget = useCallback(async (year?: number) => {
     const targetYear = year ?? budgetYear;
@@ -134,25 +139,26 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     setIsLoading(true);
-    Promise.all([fetchWorkspaces(), fetchCategories()]).finally(() => {
+    fetchWorkspaces().finally(() => {
       setWorkspacesInitialized(true);
     });
-  }, [fetchCategories, fetchWorkspaces]);
+  }, [fetchWorkspaces]);
 
   useEffect(() => {
     if (!workspacesInitialized) return;
     if (!workspaceId) {
       setAccounts([]);
       setTransactions([]);
+      setCategories([]);
       setBudgetLines([]);
       setIsLoading(false);
       return;
     }
     setIsLoading(true);
-    Promise.all([fetchAccounts(), fetchTransactions(), fetchBudget()]).finally(() => {
+    Promise.all([fetchAccounts(), fetchTransactions(), fetchCategories(), fetchBudget()]).finally(() => {
       setIsLoading(false);
     });
-  }, [fetchAccounts, fetchBudget, fetchTransactions, workspaceId, workspacesInitialized]);
+  }, [fetchAccounts, fetchBudget, fetchCategories, fetchTransactions, workspaceId, workspacesInitialized]);
 
   const contextValue = useMemo(() => ({
     workspaces,

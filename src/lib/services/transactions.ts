@@ -1,6 +1,8 @@
 import { db } from "./firestore";
 import type { Account, Transaction } from "../types";
 import { getAccounts } from './accounts';
+import { getCategories } from './categories';
+import { validateCategorySelection } from '../category-ownership';
 import { normalizeTransactionTypeFields, validateInternalTransfer } from '../internal-transfer';
 import { findPotentialTransfers } from '../utils/duplicate-utils';
 
@@ -54,6 +56,15 @@ const validateTransactionWorkspaceReferences = async (
             'transactions',
             transaction.linkedTransactionId,
             'Linked transaction'
+        );
+    }
+    if (transaction.categoryId || transaction.subcategoryId) {
+        const categories = await getCategories(workspaceId);
+        validateCategorySelection(
+            categories,
+            workspaceId,
+            transaction.categoryId,
+            transaction.subcategoryId
         );
     }
 };

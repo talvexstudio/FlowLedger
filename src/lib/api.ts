@@ -114,25 +114,34 @@ export const apiCreateCounterpartForExisting = (
 });
 
 // ─── Categories ────────────────────────────────────────────────────────────
-export const apiGetCategories = () =>
-  call<(Category & { subcategories: Subcategory[] })[]>('/api/categories');
+export const apiGetCategories = (workspaceId: string) =>
+  call<(Category & { subcategories: Subcategory[] })[]>(`/api/categories?workspaceId=${workspaceId}`);
 
-export const buildCategorySaveRequest = (data: Category) => ({
+export const buildCategorySaveRequest = (
+  workspaceId: string,
+  data: Category | Omit<Category, 'id'>
+) => ({
   entity: 'category' as const,
+  workspaceId,
   data,
 });
 
-export const buildSubcategorySaveRequest = (categoryId: string, data: Subcategory) => ({
+export const buildSubcategorySaveRequest = (
+  workspaceId: string,
+  categoryId: string,
+  data: Subcategory
+) => ({
   entity: 'subcategory' as const,
+  workspaceId,
   categoryId,
   data: { ...data, categoryId },
 });
 
-export const apiSaveCategory = (data: Category) =>
-  call<Category>('/api/categories', { method: 'POST', body: JSON.stringify(buildCategorySaveRequest(data)) });
+export const apiSaveCategory = (workspaceId: string, data: Category | Omit<Category, 'id'>) =>
+  call<Category>('/api/categories', { method: 'POST', body: JSON.stringify(buildCategorySaveRequest(workspaceId, data)) });
 
-export const apiSaveSubcategory = (categoryId: string, data: Subcategory) =>
-  call<Subcategory>('/api/categories', { method: 'POST', body: JSON.stringify(buildSubcategorySaveRequest(categoryId, data)) });
+export const apiSaveSubcategory = (workspaceId: string, categoryId: string, data: Subcategory) =>
+  call<Subcategory>('/api/categories', { method: 'POST', body: JSON.stringify(buildSubcategorySaveRequest(workspaceId, categoryId, data)) });
 
 // ─── Rules ─────────────────────────────────────────────────────────────────
 export const apiGetRules = (workspaceId: string) =>

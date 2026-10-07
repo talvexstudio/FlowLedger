@@ -248,11 +248,13 @@ test('rule mutations are scoped and cross-workspace account references are rejec
   );
   await assert.rejects(() => rules.deleteRule('ws2', 'rule-1'), /workspace/i);
 
-  const categoryDeferred = await rules.saveRule('ws1', {
-    workspaceId: 'ws1', match: { descriptionContains: 'coffee' },
-    action: { categoryId: 'global-category-until-phase-3' }, createdAt: new Date(now),
-  });
-  assert.equal(categoryDeferred.workspaceId, 'ws1');
+  await assert.rejects(
+    () => rules.saveRule('ws1', {
+      workspaceId: 'ws1', match: { descriptionContains: 'coffee' },
+      action: { categoryId: 'global-category-no-longer-supported' }, createdAt: new Date(now),
+    }),
+    /Category not found in the selected workspace/i
+  );
 });
 
 test('budgets use globally unique new IDs and preserve legacy year-ID lookup', async () => {

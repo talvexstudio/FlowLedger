@@ -91,7 +91,7 @@ export type ImportSession = {
 
 export type Category = {
   id: string;
-  workspaceId?: string | null;
+  workspaceId: string;
   name: string;
   type: 'expense' | 'income' | 'both';
   order: number;
@@ -102,7 +102,7 @@ export type Category = {
 
 export type Subcategory = {
   id:string;
-  workspaceId?: string | null;
+  workspaceId: string;
   categoryId: string;
   name: string;
   order: number;

@@ -1,5 +1,7 @@
 import { db } from './firestore';
 import type { Budget, BudgetLine } from '../types';
+import { getCategories } from './categories';
+import { validateCategorySelection } from '../category-ownership';
 
 const budgetsCollection = (workspaceId: string) =>
   db.collection(`workspaces/${workspaceId}/budgets`);
@@ -118,6 +120,12 @@ export const saveBudgetLine = async (
   year: number,
   line: Partial<BudgetLine>
 ): Promise<BudgetLine> => {
+  validateCategorySelection(
+    await getCategories(workspaceId),
+    workspaceId,
+    line.categoryId,
+    line.subcategoryId
+  );
   const budget = await ensureBudget(workspaceId, year);
   const categoryId = line.categoryId!;
   const existing = await findBudgetLineDocument(workspaceId, year, categoryId);

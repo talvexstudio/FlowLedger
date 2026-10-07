@@ -1,7 +1,7 @@
 import { canonicalizeStoreRecords, type BackupRecord } from './backup';
 import { withDataLock } from './data-lock';
 import {
-  cloneDefaultSystemCategories,
+  cloneDefaultBootstrapCategories,
   cloneDefaultWorkspaces,
 } from './default-data';
 import { RestoreError } from './restore-errors';
@@ -98,7 +98,7 @@ const readCurrentStoreSet = (dataDirectory?: string): CompleteStoreSet => {
 
 const canonicalDefaults = () => ({
   workspaces: cloneDefaultWorkspaces() as BackupRecord[],
-  categories: cloneDefaultSystemCategories() as BackupRecord[],
+  categories: cloneDefaultBootstrapCategories() as BackupRecord[],
 });
 
 const equalRecords = (left: BackupRecord[], right: BackupRecord[]) =>

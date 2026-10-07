@@ -67,12 +67,14 @@ const makeReport = (
 
 const categories: (Category & { subcategories: Subcategory[] })[] = [{
   id: 'cat-food',
+  workspaceId: 'ws-pdf',
   name: 'Food',
   type: 'expense',
   order: 1,
   isSystem: true,
   subcategories: [{
     id: 'sub-dining',
+    workspaceId: 'ws-pdf',
     categoryId: 'cat-food',
     name: 'Dining',
     order: 1,
