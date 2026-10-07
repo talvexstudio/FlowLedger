@@ -21,7 +21,8 @@ export type DataManagementOperationKind =
   | 'transaction-bulk-delete'
   | 'workspace-create'
   | 'workspace-rename'
-  | 'workspace-delete';
+  | 'workspace-delete'
+  | 'demo-data-seed';
 
 export type RestoreJournalState = 'prepared' | 'replacing' | 'rollback_failed' | 'rolled_back' | 'completed';
 
