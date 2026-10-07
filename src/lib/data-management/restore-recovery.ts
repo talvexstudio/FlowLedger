@@ -18,7 +18,9 @@ export type DataManagementOperationKind =
   | 'reset-financial'
   | 'factory-reset'
   | 'import-history-delete'
-  | 'transaction-bulk-delete';
+  | 'transaction-bulk-delete'
+  | 'workspace-create'
+  | 'workspace-rename';
 
 export type RestoreJournalState = 'prepared' | 'replacing' | 'rollback_failed' | 'rolled_back' | 'completed';
 

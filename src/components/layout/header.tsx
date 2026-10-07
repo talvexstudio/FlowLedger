@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+
 import {
   SidebarTrigger,
 } from '@/components/ui/sidebar';
@@ -18,15 +20,63 @@ import {
   Avatar,
   AvatarFallback,
 } from '@/components/ui/avatar';
-import { ChevronsUpDown, LogOut, User } from 'lucide-react';
+import { ChevronsUpDown, LogOut, Pencil, Plus, User } from 'lucide-react';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
+import { useToast } from '@/hooks/use-toast';
 import { getWorkspaceSelectorLabel } from '@/lib/workspace-selection';
+import type { CreateWorkspaceInput } from '@/lib/workspace-lifecycle-types';
+import { WorkspaceFormDialog } from './workspace-form-dialog';
 import Link from 'next/link';
 
 
 export function AppHeader() {
-  const { workspaces, workspaceId, setWorkspaceId, isLoading } = useFlowLedger();
+  const {
+    workspaces,
+    workspaceId,
+    setWorkspaceId,
+    createWorkspace,
+    renameWorkspace,
+    isLoading,
+  } = useFlowLedger();
+  const { toast } = useToast();
+  const [dialogMode, setDialogMode] = useState<'create' | 'rename' | null>(null);
+  const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
   const workspaceLabel = getWorkspaceSelectorLabel(workspaces, workspaceId, isLoading);
+  const currentWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
+
+  const handleCreate = async (input: CreateWorkspaceInput) => {
+    setIsSavingWorkspace(true);
+    try {
+      const workspace = await createWorkspace(input);
+      setDialogMode(null);
+      toast({ title: 'Workspace created', description: `${workspace.name} is now selected.` });
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Could not create workspace',
+        description: (error as Error).message,
+      });
+    } finally {
+      setIsSavingWorkspace(false);
+    }
+  };
+
+  const handleRename = async (name: string) => {
+    setIsSavingWorkspace(true);
+    try {
+      const workspace = await renameWorkspace(name);
+      setDialogMode(null);
+      toast({ title: 'Workspace renamed', description: `This workspace is now called ${workspace.name}.` });
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Could not rename workspace',
+        description: (error as Error).message,
+      });
+    } finally {
+      setIsSavingWorkspace(false);
+    }
+  };
 
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b bg-background/80 backdrop-blur-sm px-4 md:px-6">
@@ -51,6 +101,18 @@ export function AppHeader() {
                         <DropdownMenuRadioItem key={ws.id} value={ws.id}>{ws.name}</DropdownMenuRadioItem>
                     ))}
                 </DropdownMenuRadioGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => setDialogMode('create')}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  New workspace
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => setDialogMode('rename')}
+                  disabled={!currentWorkspace}
+                >
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Rename workspace
+                </DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -83,6 +145,18 @@ export function AppHeader() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <WorkspaceFormDialog
+        mode={dialogMode ?? 'create'}
+        isOpen={dialogMode !== null}
+        onOpenChange={(open) => {
+          if (!open && !isSavingWorkspace) setDialogMode(null);
+        }}
+        workspaces={workspaces}
+        currentWorkspace={currentWorkspace}
+        onCreate={handleCreate}
+        onRename={handleRename}
+        isSaving={isSavingWorkspace}
+      />
     </header>
   );
 }

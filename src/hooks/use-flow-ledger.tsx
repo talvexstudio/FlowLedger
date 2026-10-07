@@ -8,6 +8,8 @@ import {
   apiGetTransactions,
   apiGetCategories,
   apiGetBudget,
+  apiCreateWorkspace,
+  apiRenameWorkspace,
 } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -15,12 +17,19 @@ import {
   persistWorkspaceId,
   type WorkspaceSelectionStorage,
 } from '@/lib/workspace-selection';
-import { isWorkspaceResponseCurrent } from '@/lib/workspace-client-state';
+import {
+  appendCreatedWorkspace,
+  isWorkspaceResponseCurrent,
+  replaceRenamedWorkspace,
+} from '@/lib/workspace-client-state';
+import type { CreateWorkspaceInput } from '@/lib/workspace-lifecycle-types';
 
 interface FlowLedgerContextType {
   workspaces: Workspace[];
   workspaceId: string | null;
   setWorkspaceId: (id: string) => void;
+  createWorkspace: (input: CreateWorkspaceInput) => Promise<Workspace>;
+  renameWorkspace: (name: string) => Promise<Workspace>;
   accounts: Account[];
   transactions: Transaction[];
   categories: (Category & { subcategories: Subcategory[] })[];
@@ -86,6 +95,37 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
     setBudgetLines([]);
     setWorkspaceIdState(id);
   }, [workspaces]);
+
+  const createWorkspace = useCallback(async (input: CreateWorkspaceInput) => {
+    const result = await apiCreateWorkspace(input);
+    const created = {
+      ...result.workspace,
+      createdAt: new Date(result.workspace.createdAt),
+      updatedAt: new Date(result.workspace.updatedAt),
+    };
+    setWorkspaces((current) => appendCreatedWorkspace(current, created));
+    persistWorkspaceId(getBrowserStorage(), created.id);
+    workspaceIdRef.current = created.id;
+    setAccounts([]);
+    setTransactions([]);
+    setCategories([]);
+    setBudgetLines([]);
+    setWorkspaceIdState(created.id);
+    return created;
+  }, []);
+
+  const renameWorkspace = useCallback(async (name: string) => {
+    const currentWorkspaceId = workspaceIdRef.current;
+    if (!currentWorkspaceId) throw new Error('No workspace is selected.');
+    const result = await apiRenameWorkspace(currentWorkspaceId, name);
+    const renamed = {
+      ...result,
+      createdAt: new Date(result.createdAt),
+      updatedAt: new Date(result.updatedAt),
+    };
+    setWorkspaces((current) => replaceRenamedWorkspace(current, renamed));
+    return renamed;
+  }, []);
 
   const fetchAccounts = useCallback(async () => {
     if (!workspaceId) {
@@ -181,6 +221,8 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
     workspaces,
     workspaceId,
     setWorkspaceId,
+    createWorkspace,
+    renameWorkspace,
     accounts,
     transactions,
     categories,
@@ -192,7 +234,7 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
     reloadTransactions: fetchTransactions,
     reloadCategories: fetchCategories,
     reloadBudget: fetchBudget,
-  }), [workspaces, workspaceId, accounts, transactions, categories, budgetLines, budgetYear, isLoading]);
+  }), [workspaces, workspaceId, setWorkspaceId, createWorkspace, renameWorkspace, accounts, transactions, categories, budgetLines, budgetYear, isLoading, fetchWorkspaces, fetchAccounts, fetchTransactions, fetchCategories, fetchBudget]);
 
   return (
     <FlowLedgerContext.Provider value={contextValue}>

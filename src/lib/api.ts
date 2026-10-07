@@ -24,6 +24,10 @@ import type {
   TransactionBulkDeletePreview,
   TransactionBulkDeleteResult,
 } from '@/lib/data-management/transaction-bulk-delete-types';
+import type {
+  CreateWorkspaceInput,
+  CreateWorkspaceResult,
+} from '@/lib/workspace-lifecycle-types';
 
 async function call<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -39,8 +43,17 @@ async function call<T>(url: string, options?: RequestInit): Promise<T> {
 export const apiGetWorkspaces = () =>
   call<Workspace[]>('/api/workspaces');
 
-export const apiSaveWorkspace = (data: Partial<Workspace>) =>
-  call<Workspace>('/api/workspaces', { method: 'POST', body: JSON.stringify(data) });
+export const apiCreateWorkspace = (data: CreateWorkspaceInput) =>
+  call<CreateWorkspaceResult>('/api/workspaces', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+
+export const apiRenameWorkspace = (workspaceId: string, name: string) =>
+  call<Workspace>('/api/workspaces', {
+    method: 'PATCH',
+    body: JSON.stringify({ workspaceId, name }),
+  });
 
 // ─── Accounts ──────────────────────────────────────────────────────────────
 export const apiGetAccounts = (workspaceId: string) =>
