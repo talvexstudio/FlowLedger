@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { NextRequest } from 'next/server';
 import { POST } from '../src/app/api/pdf-import/extract/route';
+import { POST as DETECT } from '../src/app/api/pdf-import/detect/route';
 import { GET } from '../src/app/api/pdf-import/templates/route';
 import { prepareImportTransactions } from '../src/lib/import-processing';
 import { adaptPdfExtraction } from '../src/lib/pdf-import/adapter';
@@ -48,6 +49,9 @@ const main = async () => {
   const extract = (form: FormData) => baseUrl
     ? fetch(`${baseUrl}/api/pdf-import/extract`, { method: 'POST', body: form })
     : POST(new NextRequest('http://localhost/api/pdf-import/extract', { method: 'POST', body: form }));
+  const detect = (form: FormData) => baseUrl
+    ? fetch(`${baseUrl}/api/pdf-import/detect`, { method: 'POST', body: form })
+    : DETECT(new NextRequest('http://localhost/api/pdf-import/detect', { method: 'POST', body: form }));
 
   const templatesResponse = await listTemplates();
   assert.equal(templatesResponse.status, 200);
@@ -73,6 +77,19 @@ const main = async () => {
 
   for (const fixture of cases) {
     const bytes = await readFile(path.join(fixtureRoot, fixture.file));
+    const detectionForm = new FormData();
+    detectionForm.set('file', new File([bytes], fixture.file, { type: 'application/pdf' }));
+    const detectionResponse = await detect(detectionForm);
+    const detection = await detectionResponse.json() as {
+      decision?: string;
+      candidates?: Array<{ parserId: string; matched: boolean }>;
+    };
+    assert.equal(detectionResponse.status, 200);
+    assert.equal(detection.decision, 'single_match');
+    assert.deepEqual(
+      detection.candidates?.filter((candidate) => candidate.matched).map((candidate) => candidate.parserId),
+      [fixture.templateId]
+    );
     const form = new FormData();
     form.set('templateId', fixture.templateId);
     form.set('file', new File([bytes], fixture.file, { type: 'application/pdf' }));

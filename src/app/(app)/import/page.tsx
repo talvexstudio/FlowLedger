@@ -16,7 +16,9 @@ import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { useToast } from '@/hooks/use-toast';
 import {
   apiCommitImport,
+  apiDetectPdfStatement,
   apiExtractPdfStatement,
+  apiFindMatchingTemplate,
   apiGetPdfTemplates,
   apiGetRules,
   apiGetImportTemplates,
@@ -24,6 +26,7 @@ import {
   apiSaveImportTemplate,
 } from '@/lib/api';
 import type { ImportTemplate } from '@/lib/types';
+import { detectImportFileType, getImportFlowStage } from '@/lib/import-file-flow';
 import { ImportResultDialog } from '@/components/import/import-result-dialog';
 import {
   collectXlsxRows,
@@ -46,7 +49,11 @@ import {
   evaluatePdfReconciliation,
   reducePdfAcknowledgement,
 } from '@/lib/pdf-import/reconciliation';
-import type { PdfExtractionReport, PdfTemplateSummary } from '@/lib/pdf-import/types';
+import type {
+  PdfExtractionReport,
+  PdfParserDetectionResult,
+  PdfTemplateSummary,
+} from '@/lib/pdf-import/types';
 
 type FileType = ImportFileType;
 
@@ -75,9 +82,12 @@ export default function ImportPage() {
   const { workspaceId, accounts, categories, reloadTransactions } = useFlowLedger();
 
   const [templates, setTemplates] = React.useState<ImportTemplate[]>([]);
-  const [selectedTemplateId, setSelectedTemplateId] = React.useState<string | 'generic'>('generic');
+  const [selectedTemplateId, setSelectedTemplateId] = React.useState<string | 'manual'>('manual');
   const [pdfTemplates, setPdfTemplates] = React.useState<PdfTemplateSummary[]>([]);
   const [selectedPdfTemplateId, setSelectedPdfTemplateId] = React.useState('');
+  const [pdfDetection, setPdfDetection] = React.useState<PdfParserDetectionResult | null>(null);
+  const [isDetectingPdf, setIsDetectingPdf] = React.useState(false);
+  const [showManualPdfParsers, setShowManualPdfParsers] = React.useState(false);
 
   const [file, setFile] = React.useState<File | null>(null);
   const [fileType, setFileType] = React.useState<FileType | null>(null);
@@ -106,6 +116,7 @@ export default function ImportPage() {
     importId?: string;
   } | null>(null);
   const [resultDialogOpen, setResultDialogOpen] = React.useState(false);
+  const importEpochRef = React.useRef(0);
 
   const pdfReconciliationGate = React.useMemo(
     () => pdfReport
@@ -118,12 +129,42 @@ export default function ImportPage() {
     () => templates.find((tpl) => tpl.id === selectedTemplateId) || null,
     [templates, selectedTemplateId]
   );
+  const matchedPdfCandidates = React.useMemo(
+    () => pdfDetection?.candidates.filter((candidate) => candidate.matched) ?? [],
+    [pdfDetection]
+  );
+  const flowStage = getImportFlowStage(fileType);
+
+  const clearTransientImportState = React.useCallback(() => {
+    importEpochRef.current += 1;
+    setSelectedTemplateId('manual');
+    setSelectedPdfTemplateId('');
+    setPdfDetection(null);
+    setIsDetectingPdf(false);
+    setShowManualPdfParsers(false);
+    setFile(null);
+    setFileType(null);
+    setHeaderColumns([]);
+    setPreviewRows([]);
+    setCsvEncoding(null);
+    setMapping(null);
+    setPdfReport(null);
+    setPdfParsedFile(null);
+    setIsExtractingPdf(false);
+    setTargetAccountId('');
+    setSaveAsTemplate(false);
+    setNewTemplateName('');
+    setIsImporting(false);
+    setImportResult(null);
+    setResultDialogOpen(false);
+    dispatchPdfAcknowledgement({ type: 'FILE_CHANGED', fileKey: null });
+    dispatchPdfAcknowledgement({ type: 'TEMPLATE_CHANGED', templateId: null });
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
     setTemplates([]);
-    setSelectedTemplateId('generic');
-    setTargetAccountId('');
+    clearTransientImportState();
     const loadTemplates = async () => {
       if (!workspaceId) return;
       try {
@@ -135,7 +176,7 @@ export default function ImportPage() {
     };
     void loadTemplates();
     return () => { cancelled = true; };
-  }, [workspaceId]);
+  }, [workspaceId, clearTransientImportState]);
 
   React.useEffect(() => {
     if (fileType !== 'PDF' || pdfTemplates.length > 0) return;
@@ -151,7 +192,7 @@ export default function ImportPage() {
   }, [fileType, pdfTemplates.length, toast]);
 
   React.useEffect(() => {
-    if (selectedTemplateId === 'generic') return;
+    if (selectedTemplateId === 'manual') return;
     if (!selectedTemplate) return;
     setMapping(selectedTemplate.mapping);
     if (selectedTemplate.defaultAccountId) {
@@ -166,17 +207,42 @@ export default function ImportPage() {
     }));
   };
 
-  const resetFileState = () => {
-    setFile(null);
-    setFileType(null);
-    setHeaderColumns([]);
-    setPreviewRows([]);
-    setCsvEncoding(null);
-    setMapping(null);
-    setPdfReport(null);
-    setPdfParsedFile(null);
-    setSelectedPdfTemplateId('');
-    dispatchPdfAcknowledgement({ type: 'FILE_CHANGED', fileKey: null });
+  const resetFileState = () => clearTransientImportState();
+
+  const isCurrentEpoch = (epoch: number) => importEpochRef.current === epoch;
+
+  const applyExactSavedMapping = async (
+    headers: string[],
+    sourceType: ImportTemplate['sourceType'],
+    epoch: number
+  ) => {
+    if (!workspaceId || headers.length === 0) return;
+    let match: ImportTemplate | null = null;
+    try {
+      match = await apiFindMatchingTemplate(workspaceId, headers, sourceType);
+    } catch (error) {
+      if (isCurrentEpoch(epoch)) console.error(error);
+    }
+    if (!isCurrentEpoch(epoch)) return;
+    if (!match) {
+      setSelectedTemplateId('manual');
+      setMapping({ dateField: '', descriptionField: '' });
+      return;
+    }
+    setTemplates((current) => current.some((template) => template.id === match.id)
+      ? current
+      : [...current, match]);
+    setSelectedTemplateId(match.id);
+    setMapping(match.mapping);
+    if (match.defaultAccountId) setTargetAccountId(match.defaultAccountId);
+  };
+
+  const handleSavedMappingChanged = (templateId: string) => {
+    setSelectedTemplateId(templateId);
+    if (templateId === 'manual') {
+      setMapping({ dateField: '', descriptionField: '' });
+      setTargetAccountId('');
+    }
   };
 
   const handleFileSelected = async (nextFile: File | null) => {
@@ -185,21 +251,19 @@ export default function ImportPage() {
       return;
     }
 
+    clearTransientImportState();
+    const epoch = importEpochRef.current;
     const fileKey = `${nextFile.name}:${nextFile.size}:${nextFile.lastModified}`;
     dispatchPdfAcknowledgement({ type: 'FILE_CHANGED', fileKey });
-    setPdfReport(null);
-    setPdfParsedFile(null);
-    setHeaderColumns([]);
-    setPreviewRows([]);
-    setMapping(null);
 
-    const name = nextFile.name.toLowerCase();
-    if (name.endsWith('.csv')) {
+    const detectedType = detectImportFileType(nextFile.name);
+    if (detectedType === 'CSV') {
       setFile(nextFile);
       setFileType('CSV');
       try {
-        await parseCsvPreview(nextFile);
+        await parseCsvPreview(nextFile, epoch);
       } catch (error) {
+        if (!isCurrentEpoch(epoch)) return;
         toast({
           variant: 'destructive',
           title: 'CSV parsing failed',
@@ -209,15 +273,24 @@ export default function ImportPage() {
       return;
     }
 
-    if (name.endsWith('.xls') || name.endsWith('.xlsx')) {
+    if (detectedType === 'XLSX') {
       setFile(nextFile);
       setFileType('XLSX');
       setCsvEncoding(null);
-      await parseXlsxPreview(nextFile);
+      try {
+        await parseXlsxPreview(nextFile, epoch);
+      } catch (error) {
+        if (!isCurrentEpoch(epoch)) return;
+        toast({
+          variant: 'destructive',
+          title: 'XLSX parsing failed',
+          description: error instanceof Error ? error.message : 'The XLSX file could not be read.',
+        });
+      }
       return;
     }
 
-    if (name.endsWith('.pdf')) {
+    if (detectedType === 'PDF') {
       setFile(nextFile);
       setFileType('PDF');
       setCsvEncoding(null);
@@ -225,6 +298,31 @@ export default function ImportPage() {
       setSaveAsTemplate(false);
       setNewTemplateName('');
       dispatchPdfAcknowledgement({ type: 'TEMPLATE_CHANGED', templateId: null });
+      setIsDetectingPdf(true);
+      try {
+        const detection = await apiDetectPdfStatement(nextFile);
+        if (!isCurrentEpoch(epoch)) return;
+        setPdfDetection(detection);
+        const matches = detection.candidates.filter((candidate) => candidate.matched);
+        if (detection.decision === 'single_match' && matches.length === 1) {
+          const parserId = matches[0].parserId;
+          setSelectedPdfTemplateId(parserId);
+          dispatchPdfAcknowledgement({ type: 'TEMPLATE_CHANGED', templateId: parserId });
+          await extractPdf(nextFile, parserId, epoch);
+        }
+      } catch (error) {
+        if (!isCurrentEpoch(epoch)) return;
+        setShowManualPdfParsers(true);
+        toast({
+          variant: 'destructive',
+          title: 'PDF inspection failed',
+          description: error instanceof PdfExtractionApiError
+            ? getPdfExtractionErrorMessage(error.code)
+            : 'The PDF could not be inspected.',
+        });
+      } finally {
+        if (isCurrentEpoch(epoch)) setIsDetectingPdf(false);
+      }
       return;
     }
 
@@ -245,15 +343,7 @@ export default function ImportPage() {
     dispatchPdfAcknowledgement({ type: 'TEMPLATE_CHANGED', templateId });
   };
 
-  const handlePdfExtract = async () => {
-    if (!file || fileType !== 'PDF' || !selectedPdfTemplateId) {
-      toast({
-        variant: 'destructive',
-        title: 'PDF template required',
-        description: 'Select the matching PDF template before extracting.',
-      });
-      return;
-    }
+  const extractPdf = async (inputFile: File, parserId: string, epoch: number) => {
     setIsExtractingPdf(true);
     setPdfReport(null);
     setPdfParsedFile(null);
@@ -261,13 +351,15 @@ export default function ImportPage() {
     setMapping(null);
     dispatchPdfAcknowledgement({ type: 'ACKNOWLEDGE', value: false });
     try {
-      const report = await apiExtractPdfStatement(file, selectedPdfTemplateId);
+      const report = await apiExtractPdfStatement(inputFile, parserId);
       const adapted = adaptPdfExtraction(report);
+      if (!isCurrentEpoch(epoch)) return;
       setPdfReport(report);
       setPdfParsedFile(adapted.parsedFile);
       setMapping(adapted.mapping);
       setPreviewRows(adapted.previewRows);
     } catch (error) {
+      if (!isCurrentEpoch(epoch)) return;
       const description = error instanceof PdfExtractionApiError
         ? getPdfExtractionErrorMessage(error.code)
         : error instanceof PdfImportAdapterError
@@ -275,12 +367,25 @@ export default function ImportPage() {
           : 'The PDF could not be extracted.';
       toast({ variant: 'destructive', title: 'PDF extraction failed', description });
     } finally {
-      setIsExtractingPdf(false);
+      if (isCurrentEpoch(epoch)) setIsExtractingPdf(false);
     }
   };
 
-  const parseCsvPreview = async (inputFile: File) => {
+  const handlePdfExtract = async () => {
+    if (!file || fileType !== 'PDF' || !selectedPdfTemplateId) {
+      toast({
+        variant: 'destructive',
+        title: 'PDF parser required',
+        description: 'Select the matching statement format before extracting.',
+      });
+      return;
+    }
+    await extractPdf(file, selectedPdfTemplateId, importEpochRef.current);
+  };
+
+  const parseCsvPreview = async (inputFile: File, epoch: number) => {
     const parsed = parseCsvBytes(await inputFile.arrayBuffer());
+    if (!isCurrentEpoch(epoch)) return;
     if (parsed.globalErrors.length > 0 || parsed.rejectedRows.length > 0) {
       toast({
         variant: 'destructive',
@@ -292,12 +397,11 @@ export default function ImportPage() {
     setCsvEncoding(parsed.encoding);
     setHeaderColumns(parsed.headers);
     setPreviewRows(parsed.rows.slice(0, 10).map((row) => row.values));
-    setMapping(
-      selectedTemplate ? selectedTemplate.mapping : { dateField: '', descriptionField: '' }
-    );
+    setMapping({ dateField: '', descriptionField: '' });
+    await applyExactSavedMapping(parsed.headers, 'CSV', epoch);
   };
 
-  const parseXlsxPreview = async (inputFile: File) => {
+  const parseXlsxPreview = async (inputFile: File, epoch: number) => {
     const data = await inputFile.arrayBuffer();
     const workbook = XLSX.read(data, { type: 'array', cellDates: true });
     const sheetName = workbook.SheetNames[0];
@@ -305,12 +409,11 @@ export default function ImportPage() {
     const json = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as unknown[][];
     const parsed = collectXlsxRows(json);
     const headers = json[0]?.map((header) => String(header ?? '').trim()).filter(Boolean) ?? [];
+    if (!isCurrentEpoch(epoch)) return;
 
     setHeaderColumns(headers);
     setPreviewRows(parsed.rows.slice(0, 10).map((row) => row.values));
-    setMapping(
-      selectedTemplate ? selectedTemplate.mapping : { dateField: '', descriptionField: '' }
-    );
+    setMapping({ dateField: '', descriptionField: '' });
     if (parsed.globalErrors.length > 0) {
       toast({
         variant: 'destructive',
@@ -318,6 +421,7 @@ export default function ImportPage() {
         description: parsed.globalErrors[0],
       });
     }
+    await applyExactSavedMapping(headers, 'XLSX', epoch);
   };
 
   const parseFullCsv = async (inputFile: File): Promise<ParsedImportFile> =>
@@ -390,14 +494,17 @@ export default function ImportPage() {
       return;
     }
 
+    const epoch = importEpochRef.current;
     setIsImporting(true);
     try {
       const parsedFile = await parseFullFile(file, fileType);
+      if (!isCurrentEpoch(epoch)) return;
       if (parsedFile.globalErrors.length > 0) {
         throw new Error(parsedFile.globalErrors.join(' '));
       }
 
       const rules = await apiGetRules(workspaceId);
+      if (!isCurrentEpoch(epoch)) return;
       const effectiveMapping = getEffectiveImportMapping(
         mapping as ImportTemplate['mapping']
       );
@@ -438,16 +545,22 @@ export default function ImportPage() {
           fileName: file.name,
           sourceType: fileType,
           template: fileType === 'PDF'
-            ? (pdfTemplates.find((template) => template.id === selectedPdfTemplateId)?.name || '(unknown)')
-            : selectedTemplateId === 'generic'
+            ? (
+              pdfTemplates.find((template) => template.id === selectedPdfTemplateId)?.name ||
+              pdfDetection?.candidates.find((candidate) => candidate.parserId === selectedPdfTemplateId)?.displayName ||
+              '(unknown)'
+            )
+            : selectedTemplateId === 'manual'
               ? '(ad-hoc)'
               : (templates.find((template) => template.id === selectedTemplateId)?.name || '(unknown)'),
           transactionCount: prepared.transactions.length,
         },
         prepared.transactions
       );
+      if (!isCurrentEpoch(epoch)) return;
 
       await reloadTransactions();
+      if (!isCurrentEpoch(epoch)) return;
       const pendingCount = created.filter((tx) => tx.needsReview !== false).length;
       const duplicateCount = created.filter((tx) => tx.isPotentialDuplicate).length;
       setImportResult({
@@ -498,6 +611,7 @@ export default function ImportPage() {
       setSaveAsTemplate(false);
       setNewTemplateName('');
     } catch (error) {
+      if (!isCurrentEpoch(epoch)) return;
       console.error(error);
       toast({
         variant: 'destructive',
@@ -507,7 +621,7 @@ export default function ImportPage() {
           : 'Something went wrong while importing this file.',
       });
     } finally {
-      setIsImporting(false);
+      if (isCurrentEpoch(epoch)) setIsImporting(false);
     }
   };
 
@@ -526,58 +640,113 @@ export default function ImportPage() {
       <Card>
         <CardHeader>
           <CardTitle>New Import</CardTitle>
-          <CardDescription>Select an import template and upload your file.</CardDescription>
+          <CardDescription>Choose a CSV, XLS, XLSX, or selectable-text PDF file to begin.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {fileType !== 'PDF' && (
+          <FileUploader file={file} onFileSelected={handleFileSelected} />
+
+          {flowStage === 'tabular' && (
             <div className="space-y-2">
-              <Label htmlFor="template">Import Template</Label>
-              <Select value={selectedTemplateId} onValueChange={(val) => setSelectedTemplateId(val as 'generic' | string)}>
-                <SelectTrigger id="template">
-                  <SelectValue placeholder="Select a template..." />
+              <Label htmlFor="saved-mapping">Saved mapping</Label>
+              <Select value={selectedTemplateId} onValueChange={handleSavedMappingChanged}>
+                <SelectTrigger id="saved-mapping">
+                  <SelectValue placeholder="Choose a saved mapping" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="generic">Generic CSV/XLSX</SelectItem>
-                  {templates.map((tpl) => (
+                  <SelectItem value="manual">Map columns manually</SelectItem>
+                  {templates.filter((template) => template.sourceType === fileType).map((tpl) => (
                     <SelectItem key={tpl.id} value={tpl.id}>
                       {tpl.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">Templates help map file columns correctly.</p>
+              <p className="text-xs text-muted-foreground">
+                An exact saved header match is selected automatically. You can still choose another mapping.
+              </p>
             </div>
           )}
-          <FileUploader file={file} onFileSelected={handleFileSelected} />
           {fileType === 'CSV' && csvEncoding && (
             <p className="text-xs text-muted-foreground">CSV encoding: {csvEncoding}</p>
           )}
 
-          {fileType === 'PDF' && file && (
+          {flowStage === 'pdf' && file && (
             <Card className="border-dashed">
               <CardHeader>
-                <CardTitle>PDF extraction</CardTitle>
+                <CardTitle>PDF statement</CardTitle>
                 <CardDescription>
-                  Source type: PDF. Select the statement layout explicitly; templates are not auto-detected.
+                  FlowLedger checks this selectable-text PDF against its supported statement formats.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {isDetectingPdf && (
+                  <p className="text-sm text-muted-foreground">Inspecting PDF…</p>
+                )}
+
+                {pdfDetection?.decision === 'unusable_pdf' && (
+                  <Alert variant="destructive">
+                    <AlertTitle>Selectable text required</AlertTitle>
+                    <AlertDescription>
+                      This PDF appears scanned or image-only. OCR is not supported in this version.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {pdfDetection?.decision === 'single_match' && matchedPdfCandidates[0] && (
+                  <Alert>
+                    <AlertTitle>Statement format detected</AlertTitle>
+                    <AlertDescription>{matchedPdfCandidates[0].displayName}</AlertDescription>
+                  </Alert>
+                )}
+
+                {pdfDetection?.decision === 'multiple_matches' && (
+                  <Alert>
+                    <AlertTitle>More than one statement format matches</AlertTitle>
+                    <AlertDescription>Choose the correct PDF parser from the matching formats.</AlertDescription>
+                  </Alert>
+                )}
+
+                {pdfDetection?.decision === 'no_match' && (
+                  <Alert>
+                    <AlertTitle>Statement format not recognized</AlertTitle>
+                    <AlertDescription className="space-y-3">
+                      <p>FlowLedger could not recognize this PDF statement automatically.</p>
+                      {!showManualPdfParsers && (
+                        <Button type="button" variant="outline" onClick={() => setShowManualPdfParsers(true)}>
+                          Choose parser manually
+                        </Button>
+                      )}
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {(pdfDetection?.decision === 'multiple_matches' || showManualPdfParsers) && (
                   <div className="space-y-2">
-                    <Label>PDF template</Label>
+                    <Label>PDF parser</Label>
                     <Select value={selectedPdfTemplateId} onValueChange={handlePdfTemplateChanged}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select the bank statement template" />
+                        <SelectValue placeholder="Select the statement format" />
                       </SelectTrigger>
                       <SelectContent>
-                        {pdfTemplates.map((template) => (
-                          <SelectItem key={template.id} value={template.id}>
-                            {template.name}
+                        {(pdfDetection?.decision === 'multiple_matches'
+                          ? matchedPdfCandidates.map((candidate) => ({ id: candidate.parserId, name: candidate.displayName }))
+                          : pdfTemplates
+                        ).map((parser) => (
+                          <SelectItem key={parser.id} value={parser.id}>
+                            {parser.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+                    {showManualPdfParsers && (
+                      <p className="text-xs text-muted-foreground">
+                        Manual selection still verifies that the PDF matches the chosen parser.
+                      </p>
+                    )}
                   </div>
+                )}
+
+                {pdfDetection?.decision !== 'unusable_pdf' && !isDetectingPdf && (
                   <div className="space-y-2">
                     <Label>Target account</Label>
                     <Select value={targetAccountId} onValueChange={setTargetAccountId}>
@@ -593,15 +762,15 @@ export default function ImportPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handlePdfExtract}
-                  disabled={!selectedPdfTemplateId || isExtractingPdf}
-                >
-                  {isExtractingPdf ? 'Extracting PDF...' : 'Extract and preview'}
-                </Button>
+                )}
+
+                {isExtractingPdf && <p className="text-sm text-muted-foreground">Extracting transactions…</p>}
+
+                {!isDetectingPdf && !isExtractingPdf && selectedPdfTemplateId && !pdfReport && (
+                  <Button type="button" variant="outline" onClick={handlePdfExtract}>
+                    Extract and preview
+                  </Button>
+                )}
               </CardContent>
             </Card>
           )}
@@ -979,7 +1148,12 @@ export default function ImportPage() {
             onClick={handleImport}
             disabled={
               isImporting ||
+              isDetectingPdf ||
               isExtractingPdf ||
+              !file ||
+              !fileType ||
+              !mapping ||
+              !targetAccountId ||
               (fileType === 'PDF' && (!pdfReport || !pdfReconciliationGate?.canContinue))
             }
           >

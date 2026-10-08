@@ -102,13 +102,12 @@ class CdpClient {
   }
 }
 
-const clickSelectOption = async (client, triggerIndex, label) => {
-  const triggerLabel = triggerIndex === 0 ? 'PDF template' : 'Target account';
+const clickSelectOption = async (client, triggerLabel, label) => {
   await client.evaluate(`(() => {
     const fieldLabel = [...document.querySelectorAll('label')]
       .find(element => element.innerText.trim() === ${JSON.stringify(triggerLabel)});
     const trigger = fieldLabel?.parentElement?.querySelector('[role="combobox"]');
-    if (!trigger) throw new Error('Select trigger ${triggerIndex} not found');
+    if (!trigger) throw new Error('Select trigger not found: ${triggerLabel}');
     trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
     return true;
   })()`);
@@ -156,8 +155,8 @@ try {
   if (!dropped) throw new Error('Could not dispatch the PDF drop event');
 
   let pdfControlsReady = false;
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    pdfControlsReady = await client.evaluate(`document.body.innerText.includes('PDF extraction') && document.body.innerText.includes('Select the bank statement template')`);
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    pdfControlsReady = await client.evaluate(`document.body.innerText.includes('Statement format detected') && document.body.innerText.includes(${JSON.stringify(templateLabel)})`);
     if (pdfControlsReady) break;
     await delay(250);
   }
@@ -168,15 +167,7 @@ try {
     })`);
     throw new Error(`PDF extraction controls did not render after file selection: ${JSON.stringify(diagnostics)}`);
   }
-  await clickSelectOption(client, 0, templateLabel);
-  await clickSelectOption(client, 1, accountLabel);
-  await client.evaluate(`(() => {
-    const button = [...document.querySelectorAll('button')]
-      .find(element => element.innerText.trim() === 'Extract and preview');
-    if (!button) throw new Error('Extract and preview button not found');
-    button.click();
-    return true;
-  })()`);
+  await clickSelectOption(client, 'Target account', accountLabel);
 
   let passed = false;
   for (let attempt = 0; attempt < 240; attempt += 1) {
@@ -191,6 +182,7 @@ try {
       .find(element => element.innerText.trim() === 'Import Transactions');
     return {
       reconciliationPass: document.body.innerText.includes('Reconciliation: PASS'),
+      parserDetected: document.body.innerText.includes(${JSON.stringify(templateLabel)}),
       transactionCount: document.body.innerText.includes('75 transactions'),
       firstKnownRow: document.body.innerText.includes('TRF. P/O IGCP Encargos da Divida PAG IGCP'),
       mappingHidden: !document.body.innerText.includes('Column Mapping'),
@@ -202,7 +194,7 @@ try {
   if (Object.entries(result).some(([key, value]) => key !== 'selectedValues' && value !== true)) {
     throw new Error(`PDF Import UI smoke failed: ${JSON.stringify(result)}`);
   }
-  console.log('PASS PDF file -> manual template/account -> extract -> reconciliation -> preview');
+  console.log('PASS PDF file -> automatic parser detection -> account -> reconciliation -> preview');
   console.log(JSON.stringify(result, null, 2));
 } finally {
   await client?.send('Browser.close').catch(() => {});

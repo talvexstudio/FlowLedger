@@ -18,6 +18,7 @@ import type {
 import type {
   PdfExtractionErrorCode,
   PdfExtractionReport,
+  PdfParserDetectionResult,
   PdfTemplateSummary,
 } from '@/lib/pdf-import/types';
 import type {
@@ -240,9 +241,15 @@ export const apiSaveImportTemplate = (
     body: JSON.stringify(buildImportTemplateSaveRequest(workspaceId, data)),
   });
 
-export const apiFindMatchingTemplate = (workspaceId: string, headerSignature: string[]) =>
+export const apiFindMatchingTemplate = (
+  workspaceId: string,
+  headerSignature: string[],
+  sourceType?: ImportTemplate['sourceType']
+) =>
   call<ImportTemplate | null>(
-    `/api/import-templates?workspaceId=${workspaceId}&headers=${encodeURIComponent(JSON.stringify(headerSignature))}`
+    `/api/import-templates?workspaceId=${workspaceId}` +
+    `&headers=${encodeURIComponent(JSON.stringify(headerSignature))}` +
+    (sourceType ? `&sourceType=${sourceType}` : '')
   );
 
 // PDF statement extraction is deliberately separate from reusable CSV/XLSX mappings.
@@ -255,6 +262,21 @@ export class PdfExtractionApiError extends Error {
 
 export const apiGetPdfTemplates = () =>
   call<PdfTemplateSummary[]>('/api/pdf-import/templates');
+
+export const apiDetectPdfStatement = async (file: File) => {
+  const form = new FormData();
+  form.set('file', file);
+  const response = await fetch('/api/pdf-import/detect', { method: 'POST', body: form });
+  const json = await response.json() as PdfParserDetectionResult | {
+    error?: string;
+    code?: PdfExtractionErrorCode;
+  };
+  if (!response.ok) {
+    const failure = json as { error?: string; code?: PdfExtractionErrorCode };
+    throw new PdfExtractionApiError(failure.error ?? 'PDF detection failed.', failure.code);
+  }
+  return json as PdfParserDetectionResult;
+};
 
 export const apiExtractPdfStatement = async (file: File, templateId: string) => {
   const form = new FormData();

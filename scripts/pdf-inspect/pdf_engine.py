@@ -470,26 +470,111 @@ def collect_exclusion_evidence(
     return evidence
 
 
-def inspect_pdf(pdf_path: Path, template: dict[str, Any]) -> dict[str, Any]:
-    document = pymupdf.open(pdf_path)
-    tolerance = float(template.get("lineGroupingTolerance", 2.5))
+def extract_document_layout(
+    pdf_path: Path,
+    line_grouping_tolerance: float,
+) -> tuple[int, list[dict[str, Any]], str]:
     pages: list[dict[str, Any]] = []
     document_text_parts: list[str] = []
-    for index, pdf_page in enumerate(document):
-        raw_words = pdf_page.get_text("words")
-        text = pdf_page.get_text()
-        document_text_parts.append(text)
-        pages.append(
-            {
-                "page": index + 1,
-                "dimensions": {"width": round(pdf_page.rect.width, 2), "height": round(pdf_page.rect.height, 2)},
-                "selectableText": bool(text.strip()),
-                "wordCount": len(raw_words),
-                "characterCount": len(text),
-                "_lines": group_words(raw_words, tolerance),
-            }
-        )
-    document_text = "\n".join(document_text_parts)
+    with pymupdf.open(pdf_path) as document:
+        page_count = document.page_count
+        for index, pdf_page in enumerate(document):
+            raw_words = pdf_page.get_text("words")
+            text = pdf_page.get_text()
+            document_text_parts.append(text)
+            pages.append(
+                {
+                    "page": index + 1,
+                    "dimensions": {"width": round(pdf_page.rect.width, 2), "height": round(pdf_page.rect.height, 2)},
+                    "selectableText": bool(text.strip()),
+                    "wordCount": len(raw_words),
+                    "characterCount": len(text),
+                    "_lines": group_words(raw_words, line_grouping_tolerance),
+                }
+            )
+    return page_count, pages, "\n".join(document_text_parts)
+
+
+def detect_template(
+    pages: list[dict[str, Any]],
+    document_text: str,
+    template: dict[str, Any],
+) -> dict[str, Any]:
+    identification = identify_document(document_text, template)
+    section = template["section"]
+    section_active = False
+    section_detected = False
+    table_header_detected = False
+
+    for page in pages:
+        page_text = " ".join(line_text(line) for line in page["_lines"])
+        if not section_active and match_anchors(
+            page_text,
+            section.get("startAnchors", []),
+            section.get("startAnchorMode", "ALL"),
+        ):
+            section_active = True
+            section_detected = True
+        if section_active and find_header(page["_lines"], section["tableHeader"]):
+            table_header_detected = True
+            break
+
+    identification_passed = identification["status"] == "PASS"
+    matched = identification_passed and section_detected and table_header_detected
+    reasons: list[str] = []
+    if not identification_passed:
+        reasons.append("identification_evidence_failed")
+    if not section_detected:
+        reasons.append("transaction_section_not_found")
+    if not table_header_detected:
+        reasons.append("table_header_not_found")
+    if matched:
+        reasons.append("required_identification_section_and_header_matched")
+
+    return {
+        "parserId": template["id"],
+        "displayName": template["name"],
+        "matched": matched,
+        "evidence": {
+            "identification": identification_passed,
+            "section": section_detected,
+            "tableHeader": table_header_detected,
+        },
+        "reasons": reasons,
+    }
+
+
+def detect_pdf(pdf_path: Path, templates: list[dict[str, Any]]) -> dict[str, Any]:
+    tolerances = [float(template.get("lineGroupingTolerance", 2.5)) for template in templates]
+    tolerance = min(tolerances) if tolerances else 2.5
+    page_count, pages, document_text = extract_document_layout(pdf_path, tolerance)
+    selectable_page_count = sum(1 for page in pages if page["selectableText"])
+    if selectable_page_count == 0:
+        return {
+            "decision": "unusable_pdf",
+            "candidates": [],
+            "document": {
+                "pageCount": page_count,
+                "selectableTextPageCount": 0,
+            },
+        }
+
+    candidates = [detect_template(pages, document_text, template) for template in templates]
+    match_count = sum(1 for candidate in candidates if candidate["matched"])
+    decision = "single_match" if match_count == 1 else "multiple_matches" if match_count > 1 else "no_match"
+    return {
+        "decision": decision,
+        "candidates": candidates,
+        "document": {
+            "pageCount": page_count,
+            "selectableTextPageCount": selectable_page_count,
+        },
+    }
+
+
+def inspect_pdf(pdf_path: Path, template: dict[str, Any]) -> dict[str, Any]:
+    tolerance = float(template.get("lineGroupingTolerance", 2.5))
+    page_count, pages, document_text = extract_document_layout(pdf_path, tolerance)
     identification = identify_document(document_text, template)
     if identification["status"] != "PASS":
         raise ValueError(f"PDF does not match template {template['id']}: {identification}")
@@ -547,8 +632,8 @@ def inspect_pdf(pdf_path: Path, template: dict[str, Any]) -> dict[str, Any]:
         "source": {"path": str(pdf_path.resolve()), "filename": pdf_path.name},
         "library": {"name": "PyMuPDF", "module": "pymupdf", "coordinateUnit": "PDF points"},
         "document": {
-            "pageCount": document.page_count,
-            "selectableText": all(page["selectableText"] for page in pages),
+            "pageCount": page_count,
+            "selectableText": any(page["selectableText"] for page in pages),
             "pages": public_pages,
         },
         "context": context,

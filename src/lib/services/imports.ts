@@ -111,12 +111,14 @@ export const deleteImportTemplate = async (
 
 export const findMatchingTemplate = async (
   workspaceId: string,
-  headerSignature: string[]
+  headerSignature: string[],
+  sourceType?: ImportTemplate['sourceType']
 ): Promise<ImportTemplate | null> => {
   const templates = await getImportTemplates(workspaceId);
   return (
     templates.find(
       (tpl) =>
+        (!sourceType || tpl.sourceType === sourceType) &&
         JSON.stringify(tpl.headerSignature) === JSON.stringify(headerSignature)
     ) || null
   );

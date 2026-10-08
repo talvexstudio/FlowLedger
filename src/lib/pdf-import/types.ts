@@ -8,6 +8,27 @@ export type PdfTemplateSummary = {
   name: string;
 };
 
+export type PdfParserDetectionCandidate = {
+  parserId: PdfTemplateId;
+  displayName: string;
+  matched: boolean;
+  evidence: {
+    identification: boolean;
+    section: boolean;
+    tableHeader: boolean;
+  };
+  reasons: string[];
+};
+
+export type PdfParserDetectionResult = {
+  decision: 'single_match' | 'multiple_matches' | 'no_match' | 'unusable_pdf';
+  candidates: PdfParserDetectionCandidate[];
+  document: {
+    pageCount: number;
+    selectableTextPageCount: number;
+  };
+};
+
 export type PdfExtractionRow = {
   postingDateRaw: string | null;
   valueDateRaw: string | null;

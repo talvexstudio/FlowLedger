@@ -4,16 +4,25 @@ import {
   saveImportTemplate,
   findMatchingTemplate,
 } from '@/lib/services/imports';
+import type { ImportTemplate } from '@/lib/types';
 
 export async function GET(req: NextRequest) {
   const workspaceId = req.nextUrl.searchParams.get('workspaceId');
   if (!workspaceId) return NextResponse.json({ error: 'workspaceId required' }, { status: 400 });
 
   const headers = req.nextUrl.searchParams.get('headers');
+  const sourceType = req.nextUrl.searchParams.get('sourceType');
   try {
     if (headers) {
       const headerSignature = JSON.parse(headers) as string[];
-      const match = await findMatchingTemplate(workspaceId, headerSignature);
+      if (sourceType && sourceType !== 'CSV' && sourceType !== 'XLSX') {
+        return NextResponse.json({ error: 'sourceType must be CSV or XLSX' }, { status: 400 });
+      }
+      const match = await findMatchingTemplate(
+        workspaceId,
+        headerSignature,
+        sourceType as ImportTemplate['sourceType'] | undefined
+      );
       return NextResponse.json(match);
     }
     const templates = await getImportTemplates(workspaceId);

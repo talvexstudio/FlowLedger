@@ -110,6 +110,16 @@ test.after(() => {
   fs.rmSync(temporaryRoot, { recursive: true, force: true });
 });
 
+test('exact saved import mapping matching is workspace- and source-type scoped', async () => {
+  const personal = await importsService.findMatchingTemplate('ws1', ['Date'], 'CSV');
+  const business = await importsService.findMatchingTemplate('ws2', ['Date'], 'CSV');
+  const wrongSourceType = await importsService.findMatchingTemplate('ws1', ['Date'], 'XLSX');
+
+  assert.equal(personal?.id, 'tpl-1');
+  assert.equal(business?.id, 'tpl-2');
+  assert.equal(wrongSourceType, null);
+});
+
 test('scoped document operations enforce workspace ownership and keep global stores working', async () => {
   const store = jsonStoreModule.createJsonStore({ dataDirectory });
   const wrongWorkspaceAccount = store.collection('workspaces/ws2/accounts').doc('acc-1');

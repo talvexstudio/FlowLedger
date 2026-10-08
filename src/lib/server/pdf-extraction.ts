@@ -5,6 +5,7 @@ import path from 'node:path';
 import type {
   PdfExtractionErrorCode,
   PdfExtractionReport,
+  PdfParserDetectionResult,
   PdfTemplateId,
   PdfTemplateSummary,
 } from '@/lib/pdf-import/types';
@@ -123,22 +124,49 @@ const parseEngineResponse = (
   };
 };
 
-const runPythonEngine = async (
-  inputPath: string,
-  templatePath: string,
-  templateId: PdfTemplateId,
-  sourceFilename: string,
-  timeoutMs: number
+const parseDetectionResponse = (stdout: string): PdfParserDetectionResult => {
+  let result: PdfParserDetectionResult;
+  try {
+    result = JSON.parse(stdout) as PdfParserDetectionResult;
+  } catch {
+    throw new PdfExtractionError('PDF detector returned invalid JSON.', 'INVALID_ENGINE_RESPONSE');
+  }
+  const decisions = new Set(['single_match', 'multiple_matches', 'no_match', 'unusable_pdf']);
+  if (
+    !decisions.has(result?.decision) ||
+    !Array.isArray(result?.candidates) ||
+    typeof result?.document?.pageCount !== 'number' ||
+    typeof result?.document?.selectableTextPageCount !== 'number' ||
+    result.candidates.some((candidate) =>
+      !SUPPORTED_PDF_TEMPLATES.some((template) => template.id === candidate.parserId) ||
+      typeof candidate.displayName !== 'string' ||
+      typeof candidate.matched !== 'boolean' ||
+      !Array.isArray(candidate.reasons) ||
+      typeof candidate.evidence?.identification !== 'boolean' ||
+      typeof candidate.evidence?.section !== 'boolean' ||
+      typeof candidate.evidence?.tableHeader !== 'boolean'
+    )
+  ) {
+    throw new PdfExtractionError('PDF detector returned an invalid response shape.', 'INVALID_ENGINE_RESPONSE');
+  }
+  return result;
+};
+
+const runPythonJson = async <T>(
+  scriptName: string,
+  args: string[],
+  timeoutMs: number,
+  parseResponse: (stdout: string) => T
 ) => {
   const repositoryRoot = process.cwd();
-  const scriptPath = path.join(repositoryRoot, 'scripts', 'pdf-inspect', 'extract_pdf_json.py');
+  const scriptPath = path.join(repositoryRoot, 'scripts', 'pdf-inspect', scriptName);
   const pythonExecutable = process.env.PDF_IMPORT_PYTHON?.trim() ||
     (process.platform === 'win32' ? 'python' : 'python3');
 
-  return new Promise<PdfExtractionReport>((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     const child = spawn(
       pythonExecutable,
-      [scriptPath, '--template', templatePath, '--input', inputPath],
+      [scriptPath, ...args],
       {
         cwd: repositoryRoot,
         env: {
@@ -194,11 +222,7 @@ const runPythonEngine = async (
         return;
       }
       try {
-        const report = parseEngineResponse(
-          Buffer.concat(stdout).toString('utf8'),
-          templateId,
-          sourceFilename
-        );
+        const report = parseResponse(Buffer.concat(stdout).toString('utf8'));
         settled = true;
         resolve(report);
       } catch (error) {
@@ -212,28 +236,71 @@ const runPythonEngine = async (
   });
 };
 
-export const extractPdfStatement = async (
-  pdfBytes: Uint8Array,
+const runPythonEngine = (
+  inputPath: string,
+  templatePath: string,
+  templateId: PdfTemplateId,
   sourceFilename: string,
-  templateId: string,
-  options?: { timeoutMs?: number }
-): Promise<PdfExtractionReport> => {
+  timeoutMs: number
+) => runPythonJson(
+  'extract_pdf_json.py',
+  ['--template', templatePath, '--input', inputPath],
+  timeoutMs,
+  (stdout) => parseEngineResponse(stdout, templateId, sourceFilename)
+);
+
+const validatePdfBytes = (pdfBytes: Uint8Array) => {
   if (pdfBytes.byteLength === 0 || pdfBytes.byteLength > MAX_PDF_BYTES) {
     throw new PdfExtractionError('PDF must be between 1 byte and 25 MB.', 'INVALID_FILE');
   }
   if (Buffer.from(pdfBytes.subarray(0, 5)).toString('ascii') !== '%PDF-') {
     throw new PdfExtractionError('The uploaded file is not a valid PDF.', 'INVALID_FILE');
   }
+};
+
+const templatePathFor = (filename: string) => path.join(
+  process.cwd(),
+  'scripts',
+  'pdf-inspect',
+  'templates',
+  filename
+);
+
+export const detectPdfStatement = async (
+  pdfBytes: Uint8Array,
+  options?: { timeoutMs?: number }
+): Promise<PdfParserDetectionResult> => {
+  validatePdfBytes(pdfBytes);
+  const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'flowledger-pdf-'));
+  const inputPath = path.join(temporaryDirectory, 'statement.pdf');
+  const templatePaths = SUPPORTED_PDF_TEMPLATES.map((template) => templatePathFor(template.filename));
+
+  try {
+    await writeFile(inputPath, pdfBytes);
+    await Promise.all(templatePaths.map((templatePath) => readFile(templatePath)));
+    const templateArgs = templatePaths.flatMap((templatePath) => ['--template', templatePath]);
+    return await runPythonJson(
+      'detect_pdf_json.py',
+      [...templateArgs, '--input', inputPath],
+      options?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      parseDetectionResponse
+    );
+  } finally {
+    await unlink(inputPath).catch(() => undefined);
+    await rmdir(temporaryDirectory).catch(() => undefined);
+  }
+};
+
+export const extractPdfStatement = async (
+  pdfBytes: Uint8Array,
+  sourceFilename: string,
+  templateId: string,
+  options?: { timeoutMs?: number }
+): Promise<PdfExtractionReport> => {
+  validatePdfBytes(pdfBytes);
 
   const template = getTemplate(templateId);
-  const repositoryRoot = process.cwd();
-  const templatePath = path.join(
-    repositoryRoot,
-    'scripts',
-    'pdf-inspect',
-    'templates',
-    template.filename
-  );
+  const templatePath = templatePathFor(template.filename);
   const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'flowledger-pdf-'));
   const inputPath = path.join(temporaryDirectory, 'statement.pdf');
 
