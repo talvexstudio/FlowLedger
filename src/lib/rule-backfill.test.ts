@@ -195,3 +195,198 @@ test('independent potential-transfer and inconsistency review signals survive cl
   assert.equal(potentialTransfer.needsReview, true);
   assert.equal(inconsistent.needsReview, true);
 });
+
+const transferRule: ClassificationRule = {
+  id: 'rule-transfer',
+  workspaceId: 'ws1',
+  match: { descriptionContains: 'market', accountId: 'acc-ws1' },
+  action: {
+    type: 'InternalTransfer',
+    internalDirection: 'Out',
+    destinationAccountId: 'acc-cash',
+  },
+  createdFromTransactionId: 'tx-source',
+  createdAt: new Date('2026-01-01T00:00:00Z'),
+};
+
+const transferAccounts = [account(), account({ id: 'acc-cash', name: 'Cash', type: 'cash' })];
+
+test('InternalTransfer backfill requires an explicit counterpart decision', () => {
+  const source = transaction();
+  assert.throws(() => preflightRuleBackfill({
+    workspaceId: 'ws1',
+    selectedIds: [source.id],
+    candidates: [source],
+    currentTransactions: [source],
+    rule: transferRule,
+    categories,
+    accounts: transferAccounts,
+  }), /Choose whether to create reciprocal counterparts/i);
+});
+
+test('keeping a rule-classified transfer unpaired clears categories and leaves review pending', () => {
+  const source = transaction({ categoryId: 'cat-food', subcategoryId: 'sub-groceries' });
+  const plan = preflightRuleBackfill({
+    workspaceId: 'ws1',
+    selectedIds: [source.id],
+    candidates: [source],
+    currentTransactions: [source],
+    rule: transferRule,
+    categories,
+    accounts: transferAccounts,
+    transferDecision: 'keep_unpaired',
+  });
+  assert.equal(plan[0].patch.type, 'InternalTransfer');
+  assert.equal(plan[0].patch.categoryId, undefined);
+  assert.equal(plan[0].patch.subcategoryId, undefined);
+  assert.equal(plan[0].patch.internalDirection, 'Out');
+  assert.equal(plan[0].patch.destinationAccountId, 'acc-cash');
+  assert.equal(plan[0].patch.needsReview, true);
+  assert.equal(plan[0].transferResolution, undefined);
+});
+
+test('counterpart creation plan reuses one exact existing reciprocal candidate', () => {
+  const source = transaction();
+  const reciprocal = transaction({
+    id: 'tx-cash',
+    accountId: 'acc-cash',
+    amountOriginal: 20,
+    amountBase: 20,
+    description: 'Cash movement',
+    rawDescription: 'CASH MOVEMENT',
+  });
+  const plan = preflightRuleBackfill({
+    workspaceId: 'ws1',
+    selectedIds: [source.id],
+    candidates: [source],
+    currentTransactions: [source, reciprocal],
+    rule: transferRule,
+    categories,
+    accounts: transferAccounts,
+    transferDecision: 'create_counterparts',
+  });
+  assert.deepEqual(plan[0].transferResolution, { kind: 'link', candidateId: reciprocal.id });
+});
+
+test('counterpart creation plan creates only when no reciprocal candidate exists', () => {
+  const source = transaction();
+  const plan = preflightRuleBackfill({
+    workspaceId: 'ws1',
+    selectedIds: [source.id],
+    candidates: [source],
+    currentTransactions: [source],
+    rule: transferRule,
+    categories,
+    accounts: transferAccounts,
+    transferDecision: 'create_counterparts',
+  });
+  assert.deepEqual(plan[0].transferResolution, { kind: 'create' });
+});
+
+test('starts_with LEV transfer rule uses the same boundary during backfill and counterpart planning', () => {
+  const startsWithRule: ClassificationRule = {
+    ...transferRule,
+    match: {
+      descriptionContains: 'LEV',
+      matchMode: 'starts_with',
+      accountId: 'acc-ws1',
+    },
+  };
+  const matching = transaction({ description: 'LEV 1234 ATM', rawDescription: 'LEV 1234 ATM' });
+  const embedded = transaction({
+    id: 'tx-embedded',
+    description: 'PAGAMENTO LEV 1234 ATM',
+    rawDescription: 'PAGAMENTO LEV 1234 ATM',
+  });
+  const plan = preflightRuleBackfill({
+    workspaceId: 'ws1',
+    selectedIds: [matching.id],
+    candidates: [matching],
+    currentTransactions: [matching, embedded],
+    rule: startsWithRule,
+    categories,
+    accounts: transferAccounts,
+    transferDecision: 'create_counterparts',
+  });
+  assert.deepEqual(plan[0].transferResolution, { kind: 'create' });
+  assert.throws(() => preflightRuleBackfill({
+    workspaceId: 'ws1',
+    selectedIds: [embedded.id],
+    candidates: [embedded],
+    currentTransactions: [matching, embedded],
+    rule: startsWithRule,
+    categories,
+    accounts: transferAccounts,
+    transferDecision: 'keep_unpaired',
+  }), /no longer match/i);
+});
+
+test('ambiguous reciprocal candidates block the complete transfer backfill plan', () => {
+  const source = transaction();
+  const reciprocal = (id: string) => transaction({
+    id,
+    accountId: 'acc-cash',
+    amountOriginal: 20,
+    amountBase: 20,
+    description: 'Cash movement',
+    rawDescription: 'CASH MOVEMENT',
+  });
+  assert.throws(() => preflightRuleBackfill({
+    workspaceId: 'ws1',
+    selectedIds: [source.id],
+    candidates: [source],
+    currentTransactions: [source, reciprocal('tx-cash-1'), reciprocal('tx-cash-2')],
+    rule: transferRule,
+    categories,
+    accounts: transferAccounts,
+    transferDecision: 'create_counterparts',
+  }), /more than one possible counterpart/i);
+});
+
+test('transfer rule preflight rejects missing, same-account, and cross-workspace counterpart semantics', () => {
+  const source = transaction();
+  const base = {
+    workspaceId: 'ws1',
+    selectedIds: [source.id],
+    candidates: [source],
+    currentTransactions: [source],
+    categories,
+    transferDecision: 'keep_unpaired' as const,
+  };
+  assert.throws(() => preflightRuleBackfill({
+    ...base,
+    rule: { ...transferRule, action: { type: 'InternalTransfer', destinationAccountId: 'acc-cash' } },
+    accounts: transferAccounts,
+  }), /entering or leaving/i);
+  assert.throws(() => preflightRuleBackfill({
+    ...base,
+    rule: { ...transferRule, action: { ...transferRule.action, destinationAccountId: 'acc-ws1' } },
+    accounts: transferAccounts,
+  }), /different/i);
+  assert.throws(() => preflightRuleBackfill({
+    ...base,
+    rule: transferRule,
+    accounts: [account(), account({ id: 'acc-cash', workspaceId: 'ws2' })],
+  }), /does not belong/i);
+});
+
+test('stale rules and conflicting rule results fail before a mutation plan is returned', () => {
+  const source = transaction();
+  const base = {
+    workspaceId: 'ws1',
+    selectedIds: [source.id],
+    candidates: [source],
+    currentTransactions: [source],
+    rule,
+    categories,
+    accounts: [account()],
+  };
+  assert.throws(() => preflightRuleBackfill({ ...base, currentRules: [] }), /no longer exists/i);
+  assert.throws(() => preflightRuleBackfill({
+    ...base,
+    currentRules: [
+      rule,
+      { ...rule, id: 'rule-conflict', action: { type: 'Adjustment' } },
+    ],
+  }), /different classification/i);
+});

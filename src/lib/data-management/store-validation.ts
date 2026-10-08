@@ -171,6 +171,15 @@ export const STORE_VALIDATORS = {
     assertString('rules', record, index, 'workspaceId');
     if (!isRecord(record.match)) throw new StoreValidationError('rules', index, 'match must be an object');
     if (!isRecord(record.action)) throw new StoreValidationError('rules', index, 'action must be an object');
+    if (record.match.matchMode !== undefined) {
+      assertEnum('rules.match', record.match, index, 'matchMode', ['contains', 'starts_with']);
+    }
+    if (record.action.internalDirection !== undefined) {
+      assertEnum('rules.action', record.action, index, 'internalDirection', ['In', 'Out']);
+    }
+    if (record.action.destinationAccountId !== undefined) {
+      assertString('rules.action', record.action, index, 'destinationAccountId');
+    }
     assertDate('rules', record, index, 'createdAt');
   }),
   transactions: (records: unknown[]) => validateEach('transactions', records, (record, index) => {

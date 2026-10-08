@@ -282,9 +282,17 @@ export const validateRestoreReferences = (
     const match = rule.match as BackupRecord;
     const action = rule.action as BackupRecord;
     const accountId = optionalString(match, 'accountId');
+    const destinationAccountId = optionalString(action, 'destinationAccountId');
     requireReference(accounts, accountId, 'A rule references a missing account.');
     if (accountId && accounts.get(accountId)?.workspaceId !== workspaceId) {
       throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'A rule account belongs to a different workspace.');
+    }
+    requireReference(accounts, destinationAccountId, 'A rule references a missing counterpart account.');
+    if (destinationAccountId && accounts.get(destinationAccountId)?.workspaceId !== workspaceId) {
+      throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'A rule counterpart account belongs to a different workspace.');
+    }
+    if (destinationAccountId && destinationAccountId === accountId) {
+      throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'A rule counterpart account must differ from its source account.');
     }
     validateCategoryReference(action, 'A rule', categories, subcategoryParents, workspaceId);
   }

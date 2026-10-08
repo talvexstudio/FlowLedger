@@ -207,11 +207,13 @@ export function ClassificationRulesTab() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Description contains</TableHead>
+                  <TableHead>Description</TableHead>
                   <TableHead>Account</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead>Subcategory</TableHead>
                   <TableHead>Type</TableHead>
+                  <TableHead>Direction</TableHead>
+                  <TableHead>Counterpart</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -223,14 +225,28 @@ export function ClassificationRulesTab() {
                   return (
                     <TableRow key={rule.id}>
                       <TableCell>
-                        <Input
-                          value={rule.match.descriptionContains ?? ''}
-                          onChange={(event) =>
-                            handleRuleMatchChange(rule.id, {
-                              descriptionContains: event.target.value,
-                            })
-                          }
-                        />
+                        <div className="flex min-w-[330px] gap-2">
+                          <Select
+                            value={rule.match.matchMode ?? 'contains'}
+                            onValueChange={(value) => handleRuleMatchChange(rule.id, {
+                              matchMode: value as ClassificationRule['match']['matchMode'],
+                            })}
+                          >
+                            <SelectTrigger className="w-[140px] shrink-0"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="contains">Contains</SelectItem>
+                              <SelectItem value="starts_with">Starts with</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Input
+                            value={rule.match.descriptionContains ?? ''}
+                            onChange={(event) =>
+                              handleRuleMatchChange(rule.id, {
+                                descriptionContains: event.target.value,
+                              })
+                            }
+                          />
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Select
@@ -263,6 +279,7 @@ export function ClassificationRulesTab() {
                               subcategoryId: undefined,
                             })
                           }
+                          disabled={rule.action.type === 'InternalTransfer'}
                         >
                           <SelectTrigger className="w-[180px]">
                             <SelectValue placeholder="Any category" />
@@ -285,7 +302,7 @@ export function ClassificationRulesTab() {
                               subcategoryId: value === ANY_VALUE ? undefined : value,
                             })
                           }
-                          disabled={!rule.action.categoryId}
+                          disabled={!rule.action.categoryId || rule.action.type === 'InternalTransfer'}
                         >
                           <SelectTrigger className="w-[200px]">
                             <SelectValue placeholder="Any subcategory" />
@@ -303,11 +320,12 @@ export function ClassificationRulesTab() {
                       <TableCell>
                         <Select
                           value={rule.action.type ?? ANY_VALUE}
-                          onValueChange={(value) =>
-                            handleRuleActionChange(rule.id, {
-                              type: value === ANY_VALUE ? undefined : (value as Transaction['type']),
-                            })
-                          }
+                          onValueChange={(value) => {
+                            const type = value === ANY_VALUE ? undefined : (value as Transaction['type']);
+                            handleRuleActionChange(rule.id, type === 'InternalTransfer'
+                              ? { type, categoryId: undefined, subcategoryId: undefined }
+                              : { type, internalDirection: undefined, destinationAccountId: undefined });
+                          }}
                         >
                           <SelectTrigger className="w-[160px]">
                             <SelectValue placeholder="Any type" />
@@ -320,6 +338,41 @@ export function ClassificationRulesTab() {
                             <SelectItem value="Adjustment">Adjustment</SelectItem>
                           </SelectContent>
                         </Select>
+                      </TableCell>
+                      <TableCell>
+                        {rule.action.type === 'InternalTransfer' ? (
+                          <Select
+                            value={rule.action.internalDirection}
+                            onValueChange={(value) => handleRuleActionChange(rule.id, {
+                              internalDirection: value as Transaction['internalDirection'],
+                            })}
+                          >
+                            <SelectTrigger className="w-[110px]"><SelectValue placeholder="Direction" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Out">OUT</SelectItem>
+                              <SelectItem value="In">IN</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        ) : '--'}
+                      </TableCell>
+                      <TableCell>
+                        {rule.action.type === 'InternalTransfer' ? (
+                          <Select
+                            value={rule.action.destinationAccountId}
+                            onValueChange={(value) => handleRuleActionChange(rule.id, {
+                              destinationAccountId: value,
+                            })}
+                          >
+                            <SelectTrigger className="w-[180px]"><SelectValue placeholder="Counterpart" /></SelectTrigger>
+                            <SelectContent>
+                              {accounts
+                                .filter((account) => account.id !== rule.match.accountId)
+                                .map((account) => (
+                                  <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        ) : '--'}
                       </TableCell>
                       <TableCell>{formatCreatedAt(rule.createdAt)}</TableCell>
                       <TableCell className="text-right">

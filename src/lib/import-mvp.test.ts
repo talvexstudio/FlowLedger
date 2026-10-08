@@ -130,6 +130,78 @@ const existingDuplicate: Transaction = {
   updatedAt: new Date(),
 };
 
+test('new imports use generated stable-token fallback for recurring merchant variants', () => {
+  const generatedRule: ClassificationRule = {
+    id: 'rule-pingo',
+    workspaceId,
+    match: {
+      descriptionContains: 'COMPRA 8004 PINGO DOCE AROUCA AROUC CONTACTLESS',
+      accountId,
+    },
+    action: { type: 'Expense', categoryId: 'cat-expense', subcategoryId: 'sub-coffee' },
+    createdFromTransactionId: 'tx-earlier',
+    createdAt: new Date(),
+  };
+  const result = prepareImportTransactions(
+    [{
+      rowNumber: 2,
+      values: {
+        Date: '03/10/2026',
+        Description: 'COMPRA 0822 PINGO DOCE AROUCA AROUC CONTACTLESS',
+        Amount: '-12.50',
+      },
+    }],
+    mapping,
+    'CSV',
+    { workspaceId, accountId },
+    [generatedRule],
+    categories
+  );
+  assert.equal(result.transactions[0].categoryId, 'cat-expense');
+  assert.equal(result.transactions[0].subcategoryId, 'sub-coffee');
+  assert.equal(result.transactions[0].needsReview, false);
+});
+
+test('plain import applies InternalTransfer rule semantics but never creates or approves a counterpart', () => {
+  const transferRule: ClassificationRule = {
+    id: 'rule-atm-transfer',
+    workspaceId,
+    match: { descriptionContains: 'LEV', matchMode: 'starts_with', accountId },
+    action: {
+      type: 'InternalTransfer',
+      internalDirection: 'Out',
+      destinationAccountId: 'acc-cash',
+    },
+    createdFromTransactionId: 'tx-atm',
+    createdAt: new Date(),
+  };
+  const result = prepareImportTransactions(
+    [{ rowNumber: 2, values: { Date: '03/10/2026', Description: 'LEV 1234 ATM', Amount: '-20' } }],
+    mapping,
+    'CSV',
+    { workspaceId, accountId },
+    [transferRule],
+    categories
+  );
+  const imported = result.transactions[0];
+  assert.equal(imported.type, 'InternalTransfer');
+  assert.equal(imported.internalDirection, 'Out');
+  assert.equal(imported.destinationAccountId, 'acc-cash');
+  assert.equal(imported.linkedTransactionId, undefined);
+  assert.equal(imported.needsReview, true);
+
+  const nonPrefix = prepareImportTransactions(
+    [{ rowNumber: 3, values: { Date: '03/10/2026', Description: 'PAGAMENTO LEV 1234 ATM', Amount: '-20' } }],
+    mapping,
+    'CSV',
+    { workspaceId, accountId },
+    [transferRule],
+    categories
+  ).transactions[0];
+  assert.notEqual(nonPrefix.type, 'InternalTransfer');
+  assert.equal(nonPrefix.destinationAccountId, undefined);
+});
+
 const makeMemoryDependencies = (
   existing: Transaction[] = [],
   failOnSaveNumber?: number

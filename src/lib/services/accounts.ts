@@ -73,7 +73,12 @@ export const deleteAccount = async (workspaceId: string, accountId: string) => {
     const referenceCollections = [
         { name: 'imports', matches: (record: any) => record.accountId === accountId, label: 'import history' },
         { name: 'importTemplates', matches: (record: any) => record.defaultAccountId === accountId, label: 'import templates' },
-        { name: 'rules', matches: (record: any) => record.match?.accountId === accountId, label: 'classification rules' },
+        {
+            name: 'rules',
+            matches: (record: any) =>
+                record.match?.accountId === accountId || record.action?.destinationAccountId === accountId,
+            label: 'classification rules',
+        },
     ] as const;
     for (const reference of referenceCollections) {
         const snapshot = await db.collection(`workspaces/${workspaceId}/${reference.name}`).get();

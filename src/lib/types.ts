@@ -117,6 +117,7 @@ export type ClassificationRule = {
   workspaceId: string;
   match: {
     descriptionContains?: string;
+    matchMode?: 'contains' | 'starts_with';
     accountId?: string;
     minAmount?: number;
     maxAmount?: number;
@@ -125,6 +126,8 @@ export type ClassificationRule = {
     categoryId?: string;
     subcategoryId?: string;
     type?: Transaction["type"];
+    internalDirection?: Transaction["internalDirection"];
+    destinationAccountId?: string;
   };
   createdFromTransactionId?: string;
   createdAt: Date;

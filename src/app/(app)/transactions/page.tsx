@@ -12,18 +12,19 @@ import {
   apiPreviewTransactionBulkDelete,
   apiBulkDeleteTransactions,
   apiGetRules,
-  apiSaveRule,
+  apiCreateCounterpartForExisting,
+  apiLinkExistingTransferPair,
 } from "@/lib/api";
 import {
   applyRulesToTransaction,
-  ruleMatchesTransactionForBackfill,
 } from "@/lib/utils/rule-utils";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { PlusCircle } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { RuleBackfillPanel } from "@/components/transactions/rule-backfill-panel";
-import { preflightRuleBackfill } from "@/lib/rule-backfill";
+import { RuleCreationDialog } from "@/components/transactions/rule-creation-dialog";
+import { preflightRuleBackfill, type TransferBackfillDecision } from "@/lib/rule-backfill";
 
 
 export default function TransactionsPage() {
@@ -33,6 +34,7 @@ export default function TransactionsPage() {
     const [deleteState, setDeleteState] = useState<{ open: boolean; transaction: Transaction | null }>({ open: false, transaction: null });
     const [backfillCandidates, setBackfillCandidates] = useState<Transaction[]>([]);
     const [pendingRule, setPendingRule] = useState<(ClassificationRule & { categoryName?: string; subcategoryName?: string }) | null>(null);
+    const [ruleDraftTransaction, setRuleDraftTransaction] = useState<Transaction | null>(null);
     const backfillPanelRef = useRef<HTMLDivElement | null>(null);
     
     const handleNew = () => {
@@ -68,7 +70,7 @@ export default function TransactionsPage() {
         }
     };
     
-    const handleSave = async (updatedTransaction: Partial<Transaction>, createRule: boolean) => {
+    const handleSave = async (updatedTransaction: Partial<Transaction>) => {
       if (!workspaceId) return;
         try {
             const rules = updatedTransaction.id ? [] : await apiGetRules(workspaceId);
@@ -82,51 +84,6 @@ export default function TransactionsPage() {
               title: `Transaction ${updatedTransaction.id ? 'Updated' : 'Created'}`,
               description: "Your changes have been saved.",
             });
-            if (createRule) {
-              const descriptionSource = saved.rawDescription || saved.description || "";
-              const descriptionToken = extractRuleTokenFromDescription(descriptionSource);
-
-              if (descriptionToken) {
-                const ruleData: Omit<ClassificationRule, "id"> = {
-                  workspaceId,
-                  match: {
-                    descriptionContains: descriptionToken,
-                    accountId: saved.accountId,
-                  },
-                  action: {
-                    categoryId: saved.categoryId,
-                    subcategoryId: saved.subcategoryId,
-                    type: saved.type,
-                  },
-                  createdFromTransactionId: saved.id,
-                  createdAt: new Date(),
-                };
-
-                const createdRule = await apiSaveRule(workspaceId, ruleData);
-                toast({
-                  title: "Classification Rule Created",
-                  description: "A new rule has been created for similar transactions.",
-                });
-
-                const candidates = transactions.filter(
-                  (tx) =>
-                    tx.id !== saved.id && ruleMatchesTransactionForBackfill(createdRule, tx)
-                );
-
-                if (candidates.length > 0) {
-                  const categoryName = categories.find((c) => c.id === createdRule.action.categoryId)?.name;
-                  const subcategoryName = categories
-                    .find((c) => c.id === createdRule.action.categoryId)
-                    ?.subcategories.find((s) => s.id === createdRule.action.subcategoryId)?.name;
-                  setPendingRule({ ...createdRule, categoryName, subcategoryName });
-                  setBackfillCandidates(candidates);
-                  toast({
-                    title: "Rule suggestions available",
-                    description: `We found ${candidates.length} similar transaction(s). Review and apply the rule above.`,
-                  });
-                }
-              }
-            }
             return saved;
         } catch (error) {
             console.error(error);
@@ -143,6 +100,7 @@ export default function TransactionsPage() {
         setDeleteState({ open: false, transaction: null });
         setBackfillCandidates([]);
         setPendingRule(null);
+        setRuleDraftTransaction(null);
     }, [workspaceId]);
 
     useEffect(() => {
@@ -246,24 +204,59 @@ export default function TransactionsPage() {
         }
     };
 
-    const handleConfirmBackfill = async (selectedIds: string[]) => {
+    const handleRuleCreated = (createdRule: ClassificationRule, candidates: Transaction[]) => {
+        toast({
+          title: "Classification Rule Created",
+          description: "The reviewed rule will classify matching future transactions.",
+        });
+        if (candidates.length === 0) return;
+        const categoryName = categories.find((c) => c.id === createdRule.action.categoryId)?.name;
+        const subcategoryName = categories
+          .find((c) => c.id === createdRule.action.categoryId)
+          ?.subcategories.find((s) => s.id === createdRule.action.subcategoryId)?.name;
+        setPendingRule({ ...createdRule, categoryName, subcategoryName });
+        setBackfillCandidates(candidates);
+        toast({
+          title: "Rule suggestions available",
+          description: `We found ${candidates.length} similar transaction(s). Review and apply the rule above.`,
+        });
+    };
+
+    const handleConfirmBackfill = async (
+        selectedIds: string[],
+        transferDecision?: TransferBackfillDecision
+    ) => {
         if (!workspaceId || !pendingRule) return;
         const rule = pendingRule;
         const candidates = backfillCandidates;
 
         try {
+            const currentRules = await apiGetRules(workspaceId);
+            const currentRule = currentRules.find((candidate) => candidate.id === rule.id);
+            if (!currentRule) throw new Error('The selected rule no longer exists. Refresh and try again.');
             const plan = preflightRuleBackfill({
                 workspaceId,
                 selectedIds,
                 candidates,
                 currentTransactions: transactions,
-                rule,
+                rule: currentRule,
                 categories,
                 accounts,
+                currentRules,
+                transferDecision,
             });
             if (plan.length > 0) {
                 for (const item of plan) {
                     await apiSaveTransaction(workspaceId, item.patch);
+                    if (item.transferResolution?.kind === 'link') {
+                        await apiLinkExistingTransferPair(
+                            workspaceId,
+                            item.transactionId,
+                            item.transferResolution.candidateId
+                        );
+                    } else if (item.transferResolution?.kind === 'create') {
+                        await apiCreateCounterpartForExisting(workspaceId, item.transactionId);
+                    }
                 }
                 await reloadTransactions();
                 setBackfillCandidates([]);
@@ -293,6 +286,7 @@ export default function TransactionsPage() {
             <RuleBackfillPanel
               rule={pendingRule}
               transactions={backfillCandidates}
+              accounts={accounts}
               onApply={handleConfirmBackfill}
               onCancel={() => {
                 setBackfillCandidates([]);
@@ -333,9 +327,19 @@ export default function TransactionsPage() {
         onOpenChange={(open) => { if (!open) setSheetState({ open: false, transaction: null }) }}
         transaction={sheetState.transaction}
         onSave={handleSave}
+        onCreateRuleRequested={setRuleDraftTransaction}
         onResolutionComplete={reloadTransactions}
         categories={categories}
         accounts={accounts}
+      />
+      <RuleCreationDialog
+        transaction={ruleDraftTransaction}
+        workspaceId={workspaceId}
+        accounts={accounts}
+        categories={categories}
+        transactions={transactions}
+        onOpenChange={(open) => { if (!open) setRuleDraftTransaction(null); }}
+        onCreated={handleRuleCreated}
       />
       <AlertDialog open={deleteState.open} onOpenChange={(open) => { if (!open) setDeleteState({ open: false, transaction: null })}}>
         <AlertDialogContent>
@@ -356,7 +360,3 @@ export default function TransactionsPage() {
     </>
   );
 }
-
-const extractRuleTokenFromDescription = (description: string): string => {
-  return description.trim();
-};

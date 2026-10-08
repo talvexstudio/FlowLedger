@@ -37,7 +37,8 @@ interface TransactionFormSheetProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   transaction: Partial<Transaction> | null;
-  onSave: (updatedTransaction: Partial<Transaction>, createRule: boolean) => Promise<Transaction | void>;
+  onSave: (updatedTransaction: Partial<Transaction>) => Promise<Transaction | void>;
+  onCreateRuleRequested?: (transaction: Transaction) => void;
   onResolutionComplete?: () => Promise<void> | void;
   categories: (Category & { subcategories: Subcategory[] })[];
   accounts: Account[];
@@ -48,6 +49,7 @@ export function TransactionFormSheet({
   onOpenChange,
   transaction,
   onSave,
+  onCreateRuleRequested,
   onResolutionComplete,
   categories,
   accounts,
@@ -71,6 +73,7 @@ export function TransactionFormSheet({
   const hydratedFormKeyRef = useRef<string | null>(null);
   const [renderedFormKey, setRenderedFormKey] = useState<string | null>(null);
   const [resolutionTransaction, setResolutionTransaction] = useState<Transaction | null>(null);
+  const [pendingRuleTransaction, setPendingRuleTransaction] = useState<Transaction | null>(null);
   const formKey = isOpen ? transaction?.id ?? 'new' : null;
 
   useEffect(() => {
@@ -78,6 +81,7 @@ export function TransactionFormSheet({
       hydratedFormKeyRef.current = null;
       setRenderedFormKey(null);
       setResolutionTransaction(null);
+      setPendingRuleTransaction(null);
       return;
     }
 
@@ -235,18 +239,26 @@ export function TransactionFormSheet({
       transactionToSave.linkedTransactionId = undefined;
       transactionToSave.isInternalTransfer = false;
     }
-    const saved = await onSave(transactionToSave, createRule);
+    const saved = await onSave(transactionToSave);
     if (!saved) return;
     if (transaction?.id && saved.type === 'InternalTransfer' && !saved.linkedTransactionId) {
+      if (createRule) setPendingRuleTransaction(saved);
       setResolutionTransaction(saved);
       return;
     }
     onOpenChange(false);
+    if (createRule) onCreateRuleRequested?.(saved);
   };
 
   const finishResolution = async () => {
     await onResolutionComplete?.();
     onOpenChange(false);
+    if (pendingRuleTransaction) onCreateRuleRequested?.(pendingRuleTransaction);
+  };
+
+  const keepUnpaired = () => {
+    onOpenChange(false);
+    if (pendingRuleTransaction) onCreateRuleRequested?.(pendingRuleTransaction);
   };
 
   const handleAccountChange = (accountId: string) => {
@@ -309,7 +321,7 @@ export function TransactionFormSheet({
               transaction={resolutionTransaction}
               accounts={accounts}
               onComplete={finishResolution}
-              onKeepUnpaired={() => onOpenChange(false)}
+              onKeepUnpaired={keepUnpaired}
             />
           ) : (
           <Form {...form}>

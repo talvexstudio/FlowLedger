@@ -4,46 +4,173 @@ import type { Account, Category, ClassificationRule, Subcategory, Transaction } 
 import { normalizeTransactionTypeFields } from '@/lib/internal-transfer';
 import { needsReviewAfterClassification } from '@/lib/transaction-review';
 
+export type RuleMatchMethod = 'literal' | 'stable-token';
+
+export type RuleApplicationResult = {
+  transaction: Partial<Transaction>;
+  matchedRules: ClassificationRule[];
+  conflict: boolean;
+  conflictReason?: string;
+};
+
+type DescriptionToken = {
+  source: string;
+  normalized: string;
+  alphabetic: boolean;
+  volatile: boolean;
+  boilerplate: boolean;
+};
+
+const BOILERPLATE_TOKENS = new Set([
+  'COMPRA', 'COMPRAS', 'PAGAMENTO', 'PAGAMENTOS', 'PAG', 'PGTO',
+  'TRANSFERENCIA', 'TRANSF', 'MBWAY', 'VISA', 'MASTERCARD',
+  'DEBITO', 'CREDITO', 'CARTAO', 'REV', 'REVOLUT', 'CONTACTLESS',
+]);
+
+export const normalizeRuleText = (text: string): string => text
+  .normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toUpperCase()
+  .replace(/[^\p{L}\p{N}]+/gu, ' ')
+  .trim()
+  .replace(/\s+/g, ' ');
+
+const descriptionTokens = (text: string): DescriptionToken[] => {
+  const sourceTokens = text.match(/[\p{L}\p{N}]+/gu) ?? [];
+  return sourceTokens.map((source) => {
+    const normalized = normalizeRuleText(source);
+    return {
+      source,
+      normalized,
+      alphabetic: /^\p{L}+$/u.test(normalized),
+      // Only standalone all-numeric tokens are treated as volatile. Embedded
+      // merchant identifiers such as LOJA24 or A1B2 remain intact.
+      volatile: /^\d{2,}$/.test(normalized),
+      boilerplate: BOILERPLATE_TOKENS.has(normalized),
+    };
+  }).filter((token) => token.normalized.length > 0);
+};
+
+const stableDescriptionTokens = (text: string): DescriptionToken[] =>
+  descriptionTokens(text).filter((token) =>
+    !token.volatile && !token.boilerplate && token.normalized.length >= 2
+  );
+
+export const suggestStableDescriptionPattern = (description: string): string => {
+  const source = description.trim().replace(/\s+/g, ' ');
+  const stable = stableDescriptionTokens(source);
+  const meaningfulAlphabetic = stable.filter((token) => token.alphabetic);
+  if (meaningfulAlphabetic.length < 2) return source;
+  return stable.slice(0, 3).map((token) => token.source).join(' ');
+};
+
+const orderedTokensMatch = (patternTokens: string[], candidateTokens: string[]) => {
+  if (patternTokens.length === 0) return false;
+  let candidateIndex = 0;
+  for (const patternToken of patternTokens) {
+    const foundAt = candidateTokens.indexOf(patternToken, candidateIndex);
+    if (foundAt === -1) return false;
+    candidateIndex = foundAt + 1;
+  }
+  return true;
+};
+
+export const matchRuleDescription = (
+  rule: ClassificationRule,
+  description: string
+): RuleMatchMethod | null => {
+  const pattern = rule.match.descriptionContains?.trim();
+  if (!pattern) return null;
+  const mode = rule.match.matchMode ?? 'contains';
+  const normalizedDescription = description.trimStart().toLocaleLowerCase();
+  const normalizedPattern = pattern.toLocaleLowerCase();
+  if (mode === 'starts_with') {
+    return normalizedDescription.startsWith(normalizedPattern) ? 'literal' : null;
+  }
+  if (normalizedDescription.includes(normalizedPattern)) return 'literal';
+  if (!rule.createdFromTransactionId) return null;
+
+  const stablePattern = stableDescriptionTokens(pattern);
+  if (stablePattern.filter((token) => token.alphabetic).length < 2) return null;
+  const candidate = stableDescriptionTokens(description).map((token) => token.normalized);
+  return orderedTokensMatch(stablePattern.map((token) => token.normalized), candidate)
+    ? 'stable-token'
+    : null;
+};
+
+export const ruleMatchesTransaction = (
+  rule: ClassificationRule,
+  tx: Partial<Transaction>
+): RuleMatchMethod | null => {
+  if (tx.workspaceId && rule.workspaceId !== tx.workspaceId) return null;
+  if (rule.match.accountId && rule.match.accountId !== tx.accountId) return null;
+  const amount = Math.abs(tx.amountBase ?? 0);
+  if (typeof rule.match.minAmount === 'number' && amount < rule.match.minAmount) return null;
+  if (typeof rule.match.maxAmount === 'number' && amount > rule.match.maxAmount) return null;
+  return matchRuleDescription(rule, tx.rawDescription || tx.description || '');
+};
+
+const actionSignature = (rule: ClassificationRule, tx: Partial<Transaction>) => {
+  const type = rule.action.type ?? tx.type ?? null;
+  return JSON.stringify({
+    type,
+    categoryId: type === 'InternalTransfer'
+      ? null
+      : rule.action.categoryId ?? tx.categoryId ?? null,
+    subcategoryId: type === 'InternalTransfer'
+      ? null
+      : rule.action.subcategoryId ?? tx.subcategoryId ?? null,
+    internalDirection: type === 'InternalTransfer'
+      ? rule.action.internalDirection ?? tx.internalDirection ?? null
+      : null,
+    destinationAccountId: type === 'InternalTransfer'
+      ? rule.action.destinationAccountId ?? tx.destinationAccountId ?? null
+      : null,
+  });
+};
+
+export const applyRulesToTransactionWithResult = (
+  tx: Partial<Transaction>,
+  rules: ClassificationRule[]
+): RuleApplicationResult => {
+  const matchedRules = rules.filter((rule) => ruleMatchesTransaction(rule, tx) !== null);
+  if (matchedRules.length === 0) {
+    return { transaction: { ...tx }, matchedRules, conflict: false };
+  }
+  if (new Set(matchedRules.map((rule) => actionSignature(rule, tx))).size > 1) {
+    return {
+      transaction: { ...tx, needsReview: true },
+      matchedRules,
+      conflict: true,
+      conflictReason: 'More than one matching rule proposes a different classification.',
+    };
+  }
+
+  const action = matchedRules[0].action;
+  const result = normalizeTransactionTypeFields({
+    ...tx,
+    categoryId: action.categoryId ?? tx.categoryId,
+    subcategoryId: action.subcategoryId ?? tx.subcategoryId,
+    type: action.type ?? tx.type,
+    internalDirection: action.internalDirection ?? tx.internalDirection,
+    destinationAccountId: action.destinationAccountId ?? tx.destinationAccountId,
+  });
+  return {
+    transaction: action.type === 'InternalTransfer'
+      ? { ...result, needsReview: true }
+      : result,
+    matchedRules,
+    conflict: false,
+  };
+};
+
 export const applyRulesToTransaction = (
   tx: Partial<Transaction>,
   rules: ClassificationRule[]
-): Partial<Transaction> => {
-  let result = { ...tx };
-  let ruleAssignedInternalTransfer = false;
-  const desc = (tx.rawDescription || tx.description || '').toLowerCase();
-  const amount = Math.abs(tx.amountBase ?? 0);
-
-  for (const rule of rules) {
-    const m = rule.match;
-    if (m.descriptionContains && !desc.includes(m.descriptionContains.toLowerCase())) continue;
-    if (m.accountId && tx.accountId && tx.accountId !== m.accountId) continue;
-    if (typeof m.minAmount === 'number' && amount < m.minAmount) continue;
-    if (typeof m.maxAmount === 'number' && amount > m.maxAmount) continue;
-    if (rule.action.type === 'InternalTransfer') ruleAssignedInternalTransfer = true;
-    result = {
-      ...result,
-      categoryId: rule.action.categoryId ?? result.categoryId,
-      subcategoryId: rule.action.subcategoryId ?? result.subcategoryId,
-      type: rule.action.type ?? result.type,
-    };
-  }
-  const normalized = normalizeTransactionTypeFields(result);
-  return ruleAssignedInternalTransfer
-    ? { ...normalized, needsReview: true }
-    : normalized;
-};
-
-const STOPWORDS = new Set([
-  'compra', 'compras', 'pagamento', 'pagamentos', 'pag', 'pgto',
-  'transferencia', 'transf', 'mbway', 'visa', 'mastercard',
-  'debito', 'credito', 'cartao', 'rev', 'revolut',
-]);
+): Partial<Transaction> => applyRulesToTransactionWithResult(tx, rules).transaction;
 
 export const tokenizeDescription = (text: string): string[] =>
-  text
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length >= 3 && !STOPWORDS.has(t));
+  stableDescriptionTokens(text).map((token) => token.normalized.toLocaleLowerCase());
 
 export const descriptionSimilarity = (pattern: string, candidate: string): number => {
   const patternTokens = new Set(tokenizeDescription(pattern));
@@ -57,15 +184,31 @@ export const descriptionSimilarity = (pattern: string, candidate: string): numbe
 export const ruleMatchesTransactionForBackfill = (
   rule: ClassificationRule,
   tx: Transaction,
-  similarityThreshold = 0.6
+  _similarityThreshold = 0.6
 ): boolean => {
-  if (rule.match.accountId && rule.match.accountId !== tx.accountId) return false;
-  const pattern = (rule.match.descriptionContains || '').trim();
-  if (!pattern) return false;
-  const candidate = (tx.rawDescription || tx.description || '').trim();
-  if (!candidate) return false;
-  return descriptionSimilarity(pattern, candidate) >= similarityThreshold;
+  return ruleMatchesTransaction(rule, tx) !== null;
 };
+
+export const transactionAlreadyHasRuleResult = (
+  transaction: Transaction,
+  rule: ClassificationRule
+) => transaction.type === (rule.action.type ?? transaction.type) &&
+  (!rule.action.categoryId || transaction.categoryId === rule.action.categoryId) &&
+  (!rule.action.subcategoryId || transaction.subcategoryId === rule.action.subcategoryId) &&
+  (rule.action.type !== 'InternalTransfer' || (
+    transaction.internalDirection === rule.action.internalDirection &&
+    transaction.destinationAccountId === rule.action.destinationAccountId
+  ));
+
+export const getRuleBackfillCandidates = (
+  rule: ClassificationRule,
+  transactions: Transaction[],
+  excludedTransactionId?: string
+) => transactions.filter((transaction) =>
+  transaction.id !== excludedTransactionId &&
+  ruleMatchesTransactionForBackfill(rule, transaction) &&
+  !transactionAlreadyHasRuleResult(transaction, rule)
+);
 
 export const applyRuleClassificationToTransaction = (
   tx: Transaction,
@@ -87,6 +230,10 @@ export const applyRuleClassificationToTransaction = (
   }
 
   if (!updated.type && rule.action.type) updated.type = rule.action.type;
+  if (rule.action.type === 'InternalTransfer') {
+    updated.internalDirection = rule.action.internalDirection;
+    updated.destinationAccountId = rule.action.destinationAccountId;
+  }
   const normalized = normalizeTransactionTypeFields({ ...tx, ...updated });
   const patch: Partial<Transaction> = normalized.type === 'InternalTransfer'
     ? {
@@ -95,6 +242,8 @@ export const applyRuleClassificationToTransaction = (
         categoryId: undefined,
         subcategoryId: undefined,
         isInternalTransfer: true,
+        internalDirection: normalized.internalDirection,
+        destinationAccountId: normalized.destinationAccountId,
       }
     : updated;
   patch.needsReview = needsReviewAfterClassification(
@@ -103,5 +252,8 @@ export const applyRuleClassificationToTransaction = (
     accounts,
     tx.workspaceId
   );
+  if (patch.type === 'InternalTransfer' && !tx.linkedTransactionId) {
+    patch.needsReview = true;
+  }
   return patch;
 };

@@ -229,6 +229,39 @@ test('rules enforce workspace ownership during save and application while proven
   assert.doesNotThrow(() => storeState.validateCompleteStoreSet(fixture() as any));
 });
 
+test('InternalTransfer rules enforce direction and same-workspace counterpart ownership', async () => {
+  const valid = await rules.saveRule('ws1', {
+    workspaceId: 'ws1',
+    match: { descriptionContains: 'LEV', matchMode: 'starts_with', accountId: 'acc-personal' },
+    action: {
+      type: 'InternalTransfer',
+      internalDirection: 'Out',
+      destinationAccountId: 'acc-cash',
+    },
+    createdFromTransactionId: 'tx-personal',
+    createdAt: new Date(now),
+  });
+  assert.equal(valid.action.destinationAccountId, 'acc-cash');
+  await assert.rejects(() => rules.saveRule('ws1', {
+    workspaceId: 'ws1',
+    match: { descriptionContains: 'LEV', accountId: 'acc-personal' },
+    action: { type: 'InternalTransfer', destinationAccountId: 'acc-cash' },
+    createdAt: new Date(now),
+  }), /direction/i);
+  await assert.rejects(() => rules.saveRule('ws1', {
+    workspaceId: 'ws1',
+    match: { descriptionContains: 'LEV', accountId: 'acc-personal' },
+    action: { type: 'InternalTransfer', internalDirection: 'Out', destinationAccountId: 'acc-personal' },
+    createdAt: new Date(now),
+  }), /different/i);
+  await assert.rejects(() => rules.saveRule('ws1', {
+    workspaceId: 'ws1',
+    match: { descriptionContains: 'LEV', accountId: 'acc-personal' },
+    action: { type: 'InternalTransfer', internalDirection: 'Out', destinationAccountId: 'acc-business' },
+    createdAt: new Date(now),
+  }), /selected workspace/i);
+});
+
 test('budget lines enforce workspace category ownership and header consistency', async () => {
   await assert.rejects(() => budgets.saveBudgetLine('ws1', 2026, { type: 'Expense', categoryId: 'cat-business', subcategoryId: 'sub-business' }), /Category not found/i);
   const wrongYear = cloneFixture();

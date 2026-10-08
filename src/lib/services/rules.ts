@@ -1,11 +1,16 @@
 import { db } from "./firestore";
 import type { Category, ClassificationRule, Subcategory, Transaction } from "../types";
-import { normalizeTransactionTypeFields } from '../internal-transfer';
 import { requireAccount } from './accounts';
 import { getCategories } from './categories';
 import { validateCategorySelection } from '../category-ownership';
 import { assertWorkspaceDocumentExists, assertWorkspaceExists } from './workspace-integrity';
-import { needsReviewAfterClassification } from '../transaction-review';
+import {
+  applyRuleClassificationToTransaction as applyRuleClassification,
+  applyRulesToTransaction as applyRules,
+  descriptionSimilarity,
+  ruleMatchesTransactionForBackfill as ruleMatchesForBackfill,
+  tokenizeDescription,
+} from '../utils/rule-utils';
 
 const rulesCollection = (workspaceId: string) => `workspaces/${workspaceId}/rules`;
 
@@ -24,6 +29,27 @@ export const saveRule = async (
   await assertWorkspaceExists(workspaceId);
   if (data.match.accountId) {
     await requireAccount(workspaceId, data.match.accountId);
+  }
+  if (data.match.matchMode && data.match.matchMode !== 'contains' && data.match.matchMode !== 'starts_with') {
+    throw new Error('Unsupported description match mode.');
+  }
+  if (data.action.type === 'InternalTransfer') {
+    if (!data.match.accountId) {
+      throw new Error('An InternalTransfer rule must be scoped to an account.');
+    }
+    if (data.action.internalDirection !== 'In' && data.action.internalDirection !== 'Out') {
+      throw new Error('Choose an InternalTransfer direction.');
+    }
+    if (!data.action.destinationAccountId) {
+      throw new Error('Choose an InternalTransfer counterpart account.');
+    }
+    if (data.action.destinationAccountId === data.match.accountId) {
+      throw new Error('The counterpart account must be different from the rule account.');
+    }
+    await requireAccount(workspaceId, data.action.destinationAccountId);
+    if (data.action.categoryId || data.action.subcategoryId) {
+      throw new Error('InternalTransfer rules cannot assign a category or subcategory.');
+    }
   }
   if (data.action.categoryId || data.action.subcategoryId) {
     validateCategorySelection(
@@ -60,85 +86,9 @@ export const deleteRule = async (
 export const applyRulesToTransaction = (
   tx: Partial<Transaction>,
   rules: ClassificationRule[]
-): Partial<Transaction> => {
-  let result = { ...tx };
-  let ruleAssignedInternalTransfer = false;
-  const desc = (tx.rawDescription || tx.description || "").toLowerCase();
-  const amount = Math.abs(tx.amountBase ?? 0);
+): Partial<Transaction> => applyRules(tx, rules);
 
-  for (const rule of rules) {
-    if (tx.workspaceId && rule.workspaceId !== tx.workspaceId) continue;
-    const m = rule.match;
-
-    if (m.descriptionContains && !desc.includes(m.descriptionContains.toLowerCase())) {
-      continue;
-    }
-    if (m.accountId && tx.accountId && tx.accountId !== m.accountId) {
-      continue;
-    }
-    if (typeof m.minAmount === "number" && amount < m.minAmount) {
-      continue;
-    }
-    if (typeof m.maxAmount === "number" && amount > m.maxAmount) {
-      continue;
-    }
-    if (rule.action.type === 'InternalTransfer') ruleAssignedInternalTransfer = true;
-
-    result = {
-      ...result,
-      categoryId: rule.action.categoryId ?? result.categoryId,
-      subcategoryId: rule.action.subcategoryId ?? result.subcategoryId,
-      type: rule.action.type ?? result.type,
-    };
-  }
-
-  const normalized = normalizeTransactionTypeFields(result);
-  return ruleAssignedInternalTransfer
-    ? { ...normalized, needsReview: true }
-    : normalized;
-};
-
-const DESCRIPTION_STOPWORDS = new Set([
-  "compra",
-  "compras",
-  "pagamento",
-  "pagamentos",
-  "pag",
-  "pgto",
-  "transferencia",
-  "transf",
-  "mbway",
-  "visa",
-  "mastercard",
-  "debito",
-  "credito",
-  "cartao",
-  "rev",
-  "revolut",
-]);
-
-export const tokenizeDescription = (text: string): string[] => {
-  return text
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((token) => token.length >= 3 && !DESCRIPTION_STOPWORDS.has(token));
-};
-
-export const descriptionSimilarity = (pattern: string, candidate: string): number => {
-  const patternTokens = new Set(tokenizeDescription(pattern));
-  const candidateTokens = new Set(tokenizeDescription(candidate));
-
-  if (patternTokens.size === 0) return 0;
-
-  let intersect = 0;
-  patternTokens.forEach((token) => {
-    if (candidateTokens.has(token)) {
-      intersect += 1;
-    }
-  });
-
-  return intersect / patternTokens.size;
-};
+export { tokenizeDescription, descriptionSimilarity };
 
 export const ruleMatchesTransactionForBackfill = (
   rule: ClassificationRule,
@@ -146,18 +96,7 @@ export const ruleMatchesTransactionForBackfill = (
   similarityThreshold: number = 0.6
 ): boolean => {
   if (rule.workspaceId !== tx.workspaceId) return false;
-  if (rule.match.accountId && rule.match.accountId !== tx.accountId) {
-    return false;
-  }
-
-  const pattern = (rule.match.descriptionContains || "").trim();
-  if (!pattern) return false;
-
-  const candidateDesc = (tx.rawDescription || tx.description || "").trim();
-  if (!candidateDesc) return false;
-
-  const score = descriptionSimilarity(pattern, candidateDesc);
-  return score >= similarityThreshold;
+  return ruleMatchesForBackfill(rule, tx, similarityThreshold);
 };
 
 export const applyRuleClassificationToTransaction = (
@@ -168,45 +107,5 @@ export const applyRuleClassificationToTransaction = (
   if (rule.workspaceId !== tx.workspaceId) {
     throw new Error('A classification rule cannot be applied across workspaces.');
   }
-  const updated: Partial<Transaction> = { id: tx.id };
-
-  if (rule.action.categoryId) {
-    updated.categoryId = rule.action.categoryId;
-  }
-
-  if (rule.action.subcategoryId) {
-    updated.subcategoryId = rule.action.subcategoryId;
-    const category = categories.find((cat) =>
-      cat.subcategories?.some((sub) => sub.id === rule.action.subcategoryId)
-    );
-    const subcategory = category?.subcategories.find(
-      (sub) => sub.id === rule.action.subcategoryId
-    );
-    if (subcategory?.flowType) {
-      updated.type = subcategory.flowType;
-    }
-  }
-
-  if (!updated.type && rule.action.type) {
-    updated.type = rule.action.type;
-  }
-
-  const normalized = normalizeTransactionTypeFields({ ...tx, ...updated });
-  const patch: Partial<Transaction> = normalized.type === 'InternalTransfer'
-    ? {
-        id: tx.id,
-        type: 'InternalTransfer',
-        categoryId: undefined,
-        subcategoryId: undefined,
-        isInternalTransfer: true,
-      }
-    : updated;
-  patch.needsReview = needsReviewAfterClassification(
-    { ...tx, ...patch },
-    categories,
-    [],
-    tx.workspaceId
-  );
-
-  return patch;
+  return applyRuleClassification(tx, rule, categories);
 };

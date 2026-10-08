@@ -4,25 +4,32 @@ import * as React from 'react';
 import { format } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import type { ClassificationRule, Transaction } from '@/lib/types';
+import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import type { Account, ClassificationRule, Transaction } from '@/lib/types';
+import type { TransferBackfillDecision } from '@/lib/rule-backfill';
 
 interface RuleBackfillPanelProps {
   rule: ClassificationRule & { categoryName?: string; subcategoryName?: string };
   transactions: Transaction[];
-  onApply: (selectedIds: string[]) => void;
+  accounts: Account[];
+  onApply: (selectedIds: string[], transferDecision?: TransferBackfillDecision) => void;
   onCancel: () => void;
 }
 
 export function RuleBackfillPanel({
   rule,
   transactions,
+  accounts,
   onApply,
   onCancel,
 }: RuleBackfillPanelProps) {
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
+  const [transferDecision, setTransferDecision] = React.useState<TransferBackfillDecision | undefined>();
 
   React.useEffect(() => {
     setSelectedIds(transactions.map((t) => t.id));
+    setTransferDecision(undefined);
   }, [transactions]);
 
   const toggleId = (id: string) => {
@@ -32,10 +39,15 @@ export function RuleBackfillPanel({
   };
 
   const handleApply = () => {
-    onApply(selectedIds);
+    onApply(selectedIds, transferDecision);
   };
 
   if (transactions.length === 0) return null;
+  const isTransferRule = rule.action.type === 'InternalTransfer';
+  const sourceAccountName = accounts.find((account) => account.id === rule.match.accountId)?.name ?? 'Unknown account';
+  const counterpartName = accounts.find(
+    (account) => account.id === rule.action.destinationAccountId
+  )?.name ?? 'Unknown account';
 
   return (
     <div className="mb-4 rounded-lg border border-primary/30 bg-muted/40 p-4 shadow-sm">
@@ -50,7 +62,7 @@ export function RuleBackfillPanel({
             <span className="font-medium">Rule:</span>{' '}
             {rule.match.descriptionContains ? (
               <>
-                Description contains{' '}
+                Description {rule.match.matchMode === 'starts_with' ? 'starts with' : 'contains'}{' '}
                 <span className="font-mono">&quot;{rule.match.descriptionContains}&quot;</span>
               </>
             ) : (
@@ -75,6 +87,40 @@ export function RuleBackfillPanel({
           </p>
         </div>
       </div>
+
+      {isTransferRule && (
+        <div className="mt-3 space-y-3 rounded-md border bg-background p-3">
+          <div className="text-sm">
+            <p className="font-medium">{sourceAccountName} → {counterpartName}</p>
+            <p className="text-xs text-muted-foreground">
+              Direction: {rule.action.internalDirection?.toUpperCase() ?? 'not set'}
+            </p>
+          </div>
+          <RadioGroup
+            value={transferDecision}
+            onValueChange={(value) => setTransferDecision(value as TransferBackfillDecision)}
+          >
+            <div className="flex items-start gap-2">
+              <RadioGroupItem value="create_counterparts" id="create-counterparts" className="mt-0.5" />
+              <Label htmlFor="create-counterparts" className="font-normal">
+                <span className="block font-medium">Create reciprocal counterpart transactions</span>
+                <span className="text-xs text-muted-foreground">
+                  Existing unambiguous reciprocal movements are linked instead of duplicated.
+                </span>
+              </Label>
+            </div>
+            <div className="flex items-start gap-2">
+              <RadioGroupItem value="keep_unpaired" id="keep-unpaired" className="mt-0.5" />
+              <Label htmlFor="keep-unpaired" className="font-normal">
+                <span className="block font-medium">Keep source transactions unpaired for review</span>
+                <span className="text-xs text-muted-foreground">
+                  No reciprocal transaction will be created.
+                </span>
+              </Label>
+            </div>
+          </RadioGroup>
+        </div>
+      )}
 
       <div className="mt-3 max-h-72 overflow-y-auto rounded-md border">
         <table className="w-full text-xs">
@@ -110,7 +156,11 @@ export function RuleBackfillPanel({
         <Button variant="outline" size="sm" onClick={onCancel}>
           Cancel
         </Button>
-        <Button size="sm" onClick={handleApply} disabled={selectedIds.length === 0}>
+        <Button
+          size="sm"
+          onClick={handleApply}
+          disabled={selectedIds.length === 0 || (isTransferRule && !transferDecision)}
+        >
           Apply to selected ({selectedIds.length})
         </Button>
       </div>
