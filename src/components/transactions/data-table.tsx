@@ -44,8 +44,15 @@ import { formatCount } from '@/lib/data-management/ui-copy';
 import {
   getInternalTransferDisplay,
   getInternalTransferPairingStatus,
-  matchesCategoryFilter,
 } from '@/lib/internal-transfer';
+import {
+  ALL_ACCOUNTS_FILTER_ID,
+  ALL_CATEGORIES_FILTER_ID,
+  UNCATEGORIZED_CATEGORY_FILTER_ID,
+  getAccountFilterOptions,
+  getCategoryFilterOptions,
+  matchesTransactionFilters,
+} from '@/lib/transaction-filtering';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -93,15 +100,14 @@ export function TransactionsDataTable({
   const getAccountName = (accId: string) => accounts.find(a => a.id === accId)?.name || 'Unknown';
   
   const activeAccounts = React.useMemo(() => accounts.filter(a => !a.archived), [accounts]);
+  const accountFilterOptions = React.useMemo(() => getAccountFilterOptions(accounts), [accounts]);
+  const categoryFilterOptions = React.useMemo(() => getCategoryFilterOptions(categories), [categories]);
 
   const filteredTransactions = React.useMemo(() => {
     let data = [...transactions];
     const normalizedQuery = searchQuery.trim().toLowerCase();
-    if (accountFilter.length > 0) {
-      data = data.filter(t => accountFilter.includes(t.accountId));
-    }
-    if (categoryFilter.length > 0) {
-      data = data.filter(t => matchesCategoryFilter(t, categoryFilter));
+    if (accountFilter.length > 0 || categoryFilter.length > 0) {
+      data = data.filter(t => matchesTransactionFilters(t, accountFilter, categoryFilter));
     }
     if (dateRange?.from) {
       data = data.filter(t => new Date(t.date) >= dateRange.from!);
@@ -135,6 +141,18 @@ export function TransactionsDataTable({
     const existingIds = new Set(transactions.map(t => t.id));
     setSelectedIds(prev => prev.filter(id => existingIds.has(id)));
   }, [transactions]);
+
+  React.useEffect(() => {
+    const availableIds = new Set(activeAccounts.map((account) => account.id));
+    setAccountFilter((current) => current.filter((id) => availableIds.has(id)));
+  }, [activeAccounts]);
+
+  React.useEffect(() => {
+    const availableIds = new Set(categories.map((category) => category.id));
+    setCategoryFilter((current) => current.filter(
+      (id) => id === UNCATEGORIZED_CATEGORY_FILTER_ID || availableIds.has(id)
+    ));
+  }, [categories]);
 
   React.useEffect(() => {
     setCurrentPage((page) => clampTransactionPage(page, totalPages));
@@ -262,13 +280,17 @@ export function TransactionsDataTable({
               <DropdownMenuSub>
                   <DropdownMenuSubTrigger>Accounts</DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
-                      {activeAccounts.map(account => (
+                      {accountFilterOptions.map(option => (
                         <DropdownMenuCheckboxItem
-                            key={account.id}
-                            checked={accountFilter.includes(account.id)}
-                            onCheckedChange={() => toggleAccountFilter(account.id)}
+                            key={option.id}
+                            checked={option.id === ALL_ACCOUNTS_FILTER_ID
+                              ? accountFilter.length === 0
+                              : accountFilter.includes(option.id)}
+                            onCheckedChange={() => option.id === ALL_ACCOUNTS_FILTER_ID
+                              ? setAccountFilter([])
+                              : toggleAccountFilter(option.id)}
                         >
-                            {account.name}
+                            {option.label}
                         </DropdownMenuCheckboxItem>
                         ))}
                   </DropdownMenuSubContent>
@@ -276,13 +298,17 @@ export function TransactionsDataTable({
                <DropdownMenuSub>
                   <DropdownMenuSubTrigger>Categories</DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
-                      {categories.map(category => (
+                      {categoryFilterOptions.map(option => (
                         <DropdownMenuCheckboxItem
-                            key={category.id}
-                            checked={categoryFilter.includes(category.id)}
-                            onCheckedChange={() => toggleCategoryFilter(category.id)}
+                            key={option.id}
+                            checked={option.id === ALL_CATEGORIES_FILTER_ID
+                              ? categoryFilter.length === 0
+                              : categoryFilter.includes(option.id)}
+                            onCheckedChange={() => option.id === ALL_CATEGORIES_FILTER_ID
+                              ? setCategoryFilter([])
+                              : toggleCategoryFilter(option.id)}
                         >
-                            {category.name}
+                            {option.label}
                         </DropdownMenuCheckboxItem>
                         ))}
                   </DropdownMenuSubContent>

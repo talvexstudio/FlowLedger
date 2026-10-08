@@ -1,6 +1,9 @@
 import type { Account, Transaction } from './types';
 
-export const INTERNAL_TRANSFER_CATEGORY_ID = 'cat_transfers';
+export {
+  INTERNAL_TRANSFER_CATEGORY_ID,
+  matchesCategoryFilter,
+} from './transaction-filtering';
 
 export type InternalTransferValidation =
   | { valid: true }
@@ -99,15 +102,6 @@ export const getSelectableAccounts = (accounts: Account[], selectedId?: string) 
 
 export const shouldCreateInternalTransferPair = (transaction: Partial<Transaction>) =>
   transaction.type === 'InternalTransfer' && !transaction.id;
-
-export const matchesCategoryFilter = (
-  transaction: Transaction,
-  categoryIds: string[]
-) => categoryIds.length === 0 || categoryIds.some((categoryId) =>
-  categoryId === INTERNAL_TRANSFER_CATEGORY_ID
-    ? transaction.type === 'InternalTransfer'
-    : transaction.categoryId === categoryId
-);
 
 export const getInternalTransferDisplay = (
   transaction: Pick<Transaction, 'type' | 'internalDirection' | 'destinationAccountId'>,
