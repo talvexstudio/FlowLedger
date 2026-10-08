@@ -1,7 +1,7 @@
 import type { Account, Transaction } from './types';
 
 export {
-  INTERNAL_TRANSFER_CATEGORY_ID,
+  INTERNAL_TRANSFER_CATEGORY_FILTER_ID,
   matchesCategoryFilter,
 } from './transaction-filtering';
 

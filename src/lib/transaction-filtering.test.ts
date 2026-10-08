@@ -4,6 +4,7 @@ import type { Account, Category, Transaction } from './types';
 import {
   ALL_ACCOUNTS_FILTER_ID,
   ALL_CATEGORIES_FILTER_ID,
+  INTERNAL_TRANSFER_CATEGORY_FILTER_ID,
   UNCATEGORIZED_CATEGORY_FILTER_ID,
   getAccountFilterOptions,
   getCategoryFilterOptions,
@@ -60,6 +61,7 @@ test('category options keep special options first and sort real categories alpha
   assert.deepEqual(options.map((option) => option.id), [
     ALL_CATEGORIES_FILTER_ID,
     UNCATEGORIZED_CATEGORY_FILTER_ID,
+    INTERNAL_TRANSFER_CATEGORY_FILTER_ID,
     'cat-a',
     'cat-m',
     'cat-z',
@@ -93,6 +95,40 @@ test('Uncategorized excludes categorized and intentionally uncategorized Interna
   ), false);
 });
 
+test('Internal transfers includes only InternalTransfer transactions regardless of category state', () => {
+  assert.equal(matchesCategoryFilter(
+    transaction({ type: 'InternalTransfer', isInternalTransfer: true }),
+    [INTERNAL_TRANSFER_CATEGORY_FILTER_ID]
+  ), true);
+  assert.equal(matchesCategoryFilter(
+    transaction({ type: 'InternalTransfer', isInternalTransfer: true, categoryId: 'stale-category' }),
+    [INTERNAL_TRANSFER_CATEGORY_FILTER_ID]
+  ), true);
+  for (const type of ['Expense', 'Income', 'Adjustment'] as const) {
+    assert.equal(matchesCategoryFilter(
+      transaction({ type }),
+      [INTERNAL_TRANSFER_CATEGORY_FILTER_ID]
+    ), false);
+  }
+});
+
+test('account and Internal transfers filters combine with AND semantics', () => {
+  const filters = [INTERNAL_TRANSFER_CATEGORY_FILTER_ID];
+  const transfer = transaction({ type: 'InternalTransfer', isInternalTransfer: true });
+  assert.equal(matchesTransactionFilters(transfer, ['acc-a'], filters), true);
+  assert.equal(matchesTransactionFilters({ ...transfer, accountId: 'acc-b' }, ['acc-a'], filters), false);
+});
+
+test('Internal transfers and a real category retain OR semantics within Category', () => {
+  const filters = [INTERNAL_TRANSFER_CATEGORY_FILTER_ID, 'cat-transport'];
+  assert.equal(matchesCategoryFilter(
+    transaction({ type: 'InternalTransfer', isInternalTransfer: true }),
+    filters
+  ), true);
+  assert.equal(matchesCategoryFilter(transaction({ categoryId: 'cat-transport' }), filters), true);
+  assert.equal(matchesCategoryFilter(transaction({ categoryId: 'cat-food' }), filters), false);
+});
+
 test('account and Uncategorized filters combine with AND semantics', () => {
   const filters = [UNCATEGORIZED_CATEGORY_FILTER_ID];
   assert.equal(matchesTransactionFilters(transaction({ accountId: 'acc-a' }), ['acc-a'], filters), true);
@@ -124,6 +160,7 @@ test('filter options contain only the selected workspace records supplied by the
   assert.deepEqual(getCategoryFilterOptions(ws1Categories).map((option) => option.id), [
     ALL_CATEGORIES_FILTER_ID,
     UNCATEGORIZED_CATEGORY_FILTER_ID,
+    INTERNAL_TRANSFER_CATEGORY_FILTER_ID,
     'cat-1',
   ]);
 });

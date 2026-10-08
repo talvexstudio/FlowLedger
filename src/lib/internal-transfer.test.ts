@@ -20,6 +20,7 @@ import {
   applyRuleClassificationToTransaction,
   applyRulesToTransaction,
 } from './utils/rule-utils';
+import { INTERNAL_TRANSFER_CATEGORY_FILTER_ID } from './transaction-filtering';
 import {
   calculateAccountBalance,
   isConfirmedExpense,
@@ -281,7 +282,7 @@ test('import preparation keeps a rule-suggested InternalTransfer in review', () 
   assert.equal(prepared.transactions[0].needsReview, true);
 });
 
-test('the existing Internal Transfers category option filters by type', () => {
+test('the Internal transfers filter sentinel filters by type', () => {
   const pending = transaction({ id: 'pending', needsReview: true, categoryId: undefined });
   const confirmed = transaction({ id: 'confirmed', needsReview: false, categoryId: undefined });
   const pseudoCategoryExpense = transaction({
@@ -290,9 +291,9 @@ test('the existing Internal Transfers category option filters by type', () => {
     isInternalTransfer: false,
     categoryId: 'cat_transfers',
   });
-  assert.equal(matchesCategoryFilter(pending, ['cat_transfers']), true);
-  assert.equal(matchesCategoryFilter(confirmed, ['cat_transfers']), true);
-  assert.equal(matchesCategoryFilter(pseudoCategoryExpense, ['cat_transfers']), false);
+  assert.equal(matchesCategoryFilter(pending, [INTERNAL_TRANSFER_CATEGORY_FILTER_ID]), true);
+  assert.equal(matchesCategoryFilter(confirmed, [INTERNAL_TRANSFER_CATEGORY_FILTER_ID]), true);
+  assert.equal(matchesCategoryFilter(pseudoCategoryExpense, [INTERNAL_TRANSFER_CATEGORY_FILTER_ID]), false);
 });
 
 test('table display resolves transfer direction and counterpart name', () => {

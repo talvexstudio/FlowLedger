@@ -48,9 +48,9 @@ import {
 import {
   ALL_ACCOUNTS_FILTER_ID,
   ALL_CATEGORIES_FILTER_ID,
-  UNCATEGORIZED_CATEGORY_FILTER_ID,
   getAccountFilterOptions,
   getCategoryFilterOptions,
+  isCategoryFilterSentinel,
   matchesTransactionFilters,
 } from '@/lib/transaction-filtering';
 
@@ -150,7 +150,7 @@ export function TransactionsDataTable({
   React.useEffect(() => {
     const availableIds = new Set(categories.map((category) => category.id));
     setCategoryFilter((current) => current.filter(
-      (id) => id === UNCATEGORIZED_CATEGORY_FILTER_ID || availableIds.has(id)
+      (id) => isCategoryFilterSentinel(id) || availableIds.has(id)
     ));
   }, [categories]);
 

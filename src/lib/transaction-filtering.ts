@@ -3,7 +3,7 @@ import type { Account, Category, Transaction } from './types';
 export const ALL_ACCOUNTS_FILTER_ID = '__all_accounts__';
 export const ALL_CATEGORIES_FILTER_ID = '__all_categories__';
 export const UNCATEGORIZED_CATEGORY_FILTER_ID = '__uncategorized__';
-export const INTERNAL_TRANSFER_CATEGORY_ID = 'cat_transfers';
+export const INTERNAL_TRANSFER_CATEGORY_FILTER_ID = '__internal_transfer__';
 
 export type TransactionFilterOption = {
   id: string;
@@ -28,6 +28,7 @@ export const getCategoryFilterOptions = (
 ): TransactionFilterOption[] => [
   { id: ALL_CATEGORIES_FILTER_ID, label: 'All categories' },
   { id: UNCATEGORIZED_CATEGORY_FILTER_ID, label: 'Uncategorized' },
+  { id: INTERNAL_TRANSFER_CATEGORY_FILTER_ID, label: 'Internal transfers' },
   ...categories
     .map((category) => ({ id: category.id, label: category.name }))
     .sort(compareLabels),
@@ -37,6 +38,14 @@ export const isUncategorizedTransaction = (
   transaction: Pick<Transaction, 'type' | 'categoryId'>
 ) => transaction.type !== 'InternalTransfer' && !transaction.categoryId;
 
+export const isInternalTransferTransaction = (
+  transaction: Pick<Transaction, 'type'>
+) => transaction.type === 'InternalTransfer';
+
+export const isCategoryFilterSentinel = (categoryId: string) =>
+  categoryId === UNCATEGORIZED_CATEGORY_FILTER_ID ||
+  categoryId === INTERNAL_TRANSFER_CATEGORY_FILTER_ID;
+
 export const matchesCategoryFilter = (
   transaction: Transaction,
   categoryIds: string[]
@@ -44,8 +53,8 @@ export const matchesCategoryFilter = (
   if (categoryId === UNCATEGORIZED_CATEGORY_FILTER_ID) {
     return isUncategorizedTransaction(transaction);
   }
-  if (categoryId === INTERNAL_TRANSFER_CATEGORY_ID) {
-    return transaction.type === 'InternalTransfer';
+  if (categoryId === INTERNAL_TRANSFER_CATEGORY_FILTER_ID) {
+    return isInternalTransferTransaction(transaction);
   }
   return transaction.categoryId === categoryId;
 });
@@ -56,4 +65,3 @@ export const matchesTransactionFilters = (
   categoryIds: string[]
 ) => (accountIds.length === 0 || accountIds.includes(transaction.accountId))
   && matchesCategoryFilter(transaction, categoryIds);
-
