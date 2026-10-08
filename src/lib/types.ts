@@ -43,6 +43,7 @@ export type Transaction = {
   valueDate?: Date;
   description: string;
   rawDescription: string;
+  comments?: string;
   amountOriginal: number;
   currencyOriginal: string;
   amountBase: number;

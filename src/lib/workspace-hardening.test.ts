@@ -176,6 +176,50 @@ test('transaction updates, deletes, account references, and links stay in one wo
   );
 });
 
+test('transaction comments persist, normalize, clear, and survive unrelated partial updates', async () => {
+  const { id: _fixtureId, ...newTransaction } = transaction('new-comment', 'ws1', 'acc-1');
+  const created = await transactions.saveTransaction('ws1', {
+    ...newTransaction,
+    comments: '  Reimbursable by Joao  ',
+  } as any);
+  assert.equal(created.comments, 'Reimbursable by Joao');
+  assert.equal((await transactions.getTransaction('ws1', created.id))?.comments, 'Reimbursable by Joao');
+
+  await transactions.saveTransaction('ws1', { id: created.id, needsReview: true });
+  assert.equal((await transactions.getTransaction('ws1', created.id))?.comments, 'Reimbursable by Joao');
+
+  await transactions.saveTransaction('ws1', { id: created.id, comments: 'Updated note' });
+  assert.equal((await transactions.getTransaction('ws1', created.id))?.comments, 'Updated note');
+
+  await transactions.saveTransaction('ws1', {
+    id: created.id,
+    isPotentialDuplicate: true,
+    needsReview: true,
+  });
+  await transactions.saveTransaction('ws1', {
+    id: created.id,
+    isPotentialDuplicate: false,
+    potentialDuplicateMatch: null,
+    needsReview: false,
+  });
+  assert.equal((await transactions.getTransaction('ws1', created.id))?.comments, 'Updated note');
+
+  await transactions.confirmTransaction('ws1', created.id);
+  assert.equal((await transactions.getTransaction('ws1', created.id))?.comments, 'Updated note');
+
+  await transactions.saveTransaction('ws1', { id: created.id, comments: '   ' });
+  assert.equal((await transactions.getTransaction('ws1', created.id))?.comments, undefined);
+
+  await assert.rejects(
+    () => transactions.saveTransaction('ws1', { id: created.id, comments: 'x'.repeat(2001) }),
+    /characters or fewer/i
+  );
+  await assert.rejects(
+    () => transactions.saveTransaction('ws1', { id: created.id, comments: 42 as unknown as string }),
+    /plain text/i
+  );
+});
+
 test('bulk deletion rejects IDs from another workspace', async () => {
   await assert.rejects(
     () => bulkDelete.previewTransactionBulkDelete('ws1', ['tx-2'], { dataDirectory, operationsDirectory }),
@@ -200,11 +244,14 @@ test('valid same-workspace InternalTransfer paired creation still works', async 
     isInternalTransfer: true,
     isPotentialDuplicate: false,
     isInconsistent: false,
+    comments: 'Source note',
   });
   assert.equal(result.source.destinationAccountId, 'acc-2');
   assert.equal(result.destination.destinationAccountId, 'acc-1');
   assert.equal(result.source.linkedTransactionId, result.destination.id);
   assert.equal(result.destination.linkedTransactionId, result.source.id);
+  assert.equal(result.source.comments, 'Source note');
+  assert.equal(result.destination.comments, undefined);
 });
 
 test('imports and persisted import templates validate workspace ownership', async () => {

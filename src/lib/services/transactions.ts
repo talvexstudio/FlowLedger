@@ -5,6 +5,7 @@ import { getCategories } from './categories';
 import { validateCategorySelection } from '../category-ownership';
 import { normalizeTransactionTypeFields, validateInternalTransfer } from '../internal-transfer';
 import { findPotentialTransfers } from '../utils/duplicate-utils';
+import { normalizeTransactionComments } from '../transaction-comments';
 import {
     assertWorkspaceDocumentExists,
     assertWorkspaceExists,
@@ -188,11 +189,11 @@ export const saveTransaction = async (
             throw new Error('Transaction not found in the selected workspace.');
         }
         const current = currentSnapshot.data() as Partial<Transaction> | undefined;
-        let merged = normalizeTransactionTypeFields({
+        let merged = normalizeTransactionComments(normalizeTransactionTypeFields({
             ...current,
             ...transactionData,
             workspaceId,
-        });
+        }));
         if (current?.linkedTransactionId) {
             const linkedSnapshot = await coll.doc(current.linkedTransactionId).get();
             const linked = linkedSnapshot.data() as Partial<Transaction> | undefined;
@@ -218,10 +219,10 @@ export const saveTransaction = async (
         });
         return { ...data, id: transactionData.id };
     } else {
-        const normalizedFields = normalizeTransactionTypeFields({
+        const normalizedFields = normalizeTransactionComments(normalizeTransactionTypeFields({
             ...transactionData,
             workspaceId,
-        });
+        }));
         const normalizedData = normalizeAmountBase(
             await enforceInternalTransferReview(workspaceId, normalizedFields)
         );
@@ -289,7 +290,7 @@ export const createInternalTransferPair = async (
     sourceData: Partial<Transaction>,
     dependencies: InternalTransferPairDependencies = defaultInternalTransferPairDependencies
 ): Promise<{ source: Partial<Transaction>; destination: Partial<Transaction> }> => {
-    const { destinationAccountId, internalDirection, amountBase, description, ...shared } = sourceData;
+    const { destinationAccountId, internalDirection, amountBase, description, comments, ...shared } = sourceData;
     const accounts = await dependencies.getAccounts(workspaceId);
     const validation = validateInternalTransfer(sourceData, accounts, workspaceId);
     if (!validation.valid) throw new Error(validation.reason);
@@ -303,6 +304,7 @@ export const createInternalTransferPair = async (
     const source = await dependencies.saveTransaction(workspaceId, {
         ...shared,
         description,
+        comments,
         amountBase: sourceAmount,
         amountOriginal: sourceAmount,
         type: 'InternalTransfer',

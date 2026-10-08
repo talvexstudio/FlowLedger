@@ -449,6 +449,23 @@ test('Financial Data restore replaces seven stores and preserves workspaces byte
   for (const key of BACKUP_SCOPE_STORES.financial_data) assert.deepEqual(restored[key], backup.data[key]);
 });
 
+test('Activity backup and restore preserve optional transaction comments', async () => {
+  const source = fixtureStores('Commented');
+  source.transactions[0].comments = 'Check invoice';
+  for (const scope of ['activity', 'financial_data', 'everything'] as const) {
+    const scopedBackup = await createFixtureBackup(scope, source);
+    assert.equal(scopedBackup.data.transactions?.[0].comments, 'Check invoice');
+  }
+  const backup = await createFixtureBackup('activity', source);
+
+  const root = makeRoot();
+  const dataDirectory = path.join(root, 'data');
+  const operationsDirectory = path.join(root, 'operations');
+  writeStores(dataDirectory, fixtureStores('Current'));
+  await restoreBackup(backupJson(backup), { dataDirectory, operationsDirectory });
+  assert.equal(readStores(dataDirectory).transactions[0].comments, 'Check invoice');
+});
+
 test('Financial Data restore blocks workspace IDs absent from current preserved workspaces', async () => {
   const backup = await createFixtureBackup('financial_data');
   const current = fixtureStores('Current');

@@ -164,7 +164,11 @@ test('pending, confirmed, ordinary, and unlinked InternalTransfer candidates are
 });
 
 test('link existing converts and reciprocally links both records without creating a third', async () => {
-  const source = transaction({ categoryId: 'stale-source', subcategoryId: 'stale-sub' });
+  const source = transaction({
+    categoryId: 'stale-source',
+    subcategoryId: 'stale-sub',
+    comments: 'Source note',
+  });
   const candidate = transaction({
     id: 'candidate',
     accountId: 'acc-b',
@@ -177,6 +181,7 @@ test('link existing converts and reciprocally links both records without creatin
     categoryId: 'income',
     subcategoryId: 'salary',
     needsReview: true,
+    comments: 'Counterpart note',
   });
   const harness = createHarness([source, candidate]);
   const result = await linkExistingTransferPair('ws1', source.id, candidate.id, harness.dependencies);
@@ -194,6 +199,8 @@ test('link existing converts and reciprocally links both records without creatin
   assert.equal(result.counterpart.subcategoryId, undefined);
   assert.equal(result.source.needsReview, false);
   assert.equal(result.counterpart.needsReview, false);
+  assert.equal(result.source.comments, 'Source note');
+  assert.equal(result.counterpart.comments, 'Counterpart note');
 });
 
 test('link existing restores both snapshots when the second write fails', async () => {
@@ -241,7 +248,7 @@ test('already-linked source and counterpart are rejected', async () => {
 });
 
 test('create counterpart adds only one reciprocal record and links the existing source', async () => {
-  const source = transaction({ destinationAccountId: 'acc-cash' });
+  const source = transaction({ destinationAccountId: 'acc-cash', comments: 'Source-only note' });
   const harness = createHarness([source]);
   const result = await createCounterpartForExisting('ws1', source.id, false, harness.dependencies);
   assert.equal(harness.createCount, 1);
@@ -254,6 +261,8 @@ test('create counterpart adds only one reciprocal record and links the existing 
   assert.equal(result.counterpart.internalDirection, 'In');
   assert.equal(result.counterpart.linkedTransactionId, source.id);
   assert.equal(result.counterpart.description, 'Transfer: Transfer');
+  assert.equal(result.source.comments, 'Source-only note');
+  assert.equal(result.counterpart.comments, undefined);
 });
 
 test('create counterpart removes the new record when linking the source fails', async () => {

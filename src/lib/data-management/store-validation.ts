@@ -1,4 +1,5 @@
 import type { PersistedRecord } from './default-data';
+import { TRANSACTION_COMMENTS_MAX_LENGTH } from '../transaction-comments';
 
 export class StoreValidationError extends Error {
   constructor(storeKey: string, index: number, detail: string) {
@@ -188,6 +189,16 @@ export const STORE_VALIDATORS = {
     assertString('transactions', record, index, 'accountId');
     assertDate('transactions', record, index, 'date');
     assertString('transactions', record, index, 'description');
+    if (record.comments !== undefined) {
+      assertString('transactions', record, index, 'comments');
+      if ((record.comments as string).length > TRANSACTION_COMMENTS_MAX_LENGTH) {
+        throw new StoreValidationError(
+          'transactions',
+          index,
+          `comments must be ${TRANSACTION_COMMENTS_MAX_LENGTH} characters or fewer`
+        );
+      }
+    }
     assertNumber('transactions', record, index, 'amountOriginal');
     assertString('transactions', record, index, 'currencyOriginal');
     assertNumber('transactions', record, index, 'amountBase');

@@ -1,10 +1,15 @@
 import { z } from 'zod';
+import { TRANSACTION_COMMENTS_MAX_LENGTH } from './transaction-comments';
 
 export const transactionSchema = z.object({
   id: z.string().optional(),
   accountId: z.string().min(1, "Account is required."),
   date: z.date({ required_error: "Please select a date." }),
   description: z.string().min(1, 'Description is required.'),
+  comments: z.string().max(
+    TRANSACTION_COMMENTS_MAX_LENGTH,
+    `Comments must be ${TRANSACTION_COMMENTS_MAX_LENGTH.toLocaleString()} characters or fewer.`
+  ).optional(),
   amountBase: z.number({ required_error: "Amount is required."}).min(-100000000, "Amount is too low").max(100000000, "Amount is too high"),
   type: z.enum(['Expense', 'Income', 'InternalTransfer', 'Adjustment']),
   internalDirection: z.enum(['Out', 'In']).optional(),

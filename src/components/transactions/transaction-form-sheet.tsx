@@ -15,6 +15,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -32,6 +33,7 @@ import { format } from 'date-fns';
 import { TriangleAlert } from 'lucide-react';
 import { getSelectableAccounts, getTransactionTypeChangePatch } from '@/lib/internal-transfer';
 import { TransferResolutionPanel } from './transfer-resolution-panel';
+import { TRANSACTION_COMMENTS_MAX_LENGTH } from '@/lib/transaction-comments';
 
 interface TransactionFormSheetProps {
   isOpen: boolean;
@@ -60,6 +62,7 @@ export function TransactionFormSheet({
       accountId: '',
       date: new Date(),
       description: '',
+      comments: '',
       amountBase: 0,
       type: 'Expense',
       categoryId: undefined,
@@ -94,6 +97,7 @@ export function TransactionFormSheet({
         accountId: transaction.accountId ?? '',
         date: transaction.date ? new Date(transaction.date) : new Date(),
         description: transaction.description ?? '',
+        comments: transaction.comments ?? '',
         amountBase: Math.abs(transaction.amountBase || 0),
         type: transaction.type ?? 'Expense',
         internalDirection:
@@ -111,6 +115,7 @@ export function TransactionFormSheet({
         accountId: '',
         date: new Date(),
         description: '',
+        comments: '',
         amountBase: 0,
         type: 'Expense',
         categoryId: undefined,
@@ -421,6 +426,26 @@ export function TransactionFormSheet({
                   <FormControl>
                     <Input placeholder="e.g., Dinner with friends" {...field} />
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="comments"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Comments</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      placeholder="Optional note about this transaction."
+                      maxLength={TRANSACTION_COMMENTS_MAX_LENGTH}
+                      {...field}
+                      value={field.value ?? ''}
+                    />
+                  </FormControl>
+                  <FormDescription>Optional note about this transaction.</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}

@@ -53,6 +53,10 @@ import {
   isCategoryFilterSentinel,
   matchesTransactionFilters,
 } from '@/lib/transaction-filtering';
+import {
+  getTransactionCommentDisplay,
+  TRANSACTION_TABLE_COLUMN_LABELS,
+} from '@/lib/transaction-comments';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -350,17 +354,20 @@ export function TransactionsDataTable({
                     aria-label="Select all transactions on page"
                   />
                 </TableHead>
-                <TableHead className="w-[100px]">Date</TableHead>
-                <TableHead>Account</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead className="text-center w-24">Actions</TableHead>
+                <TableHead className="w-[100px]">{TRANSACTION_TABLE_COLUMN_LABELS[0]}</TableHead>
+                <TableHead>{TRANSACTION_TABLE_COLUMN_LABELS[1]}</TableHead>
+                <TableHead>{TRANSACTION_TABLE_COLUMN_LABELS[2]}</TableHead>
+                <TableHead>{TRANSACTION_TABLE_COLUMN_LABELS[3]}</TableHead>
+                <TableHead className="w-[180px]">{TRANSACTION_TABLE_COLUMN_LABELS[4]}</TableHead>
+                <TableHead className="text-right">{TRANSACTION_TABLE_COLUMN_LABELS[5]}</TableHead>
+                <TableHead className="text-center w-24">{TRANSACTION_TABLE_COLUMN_LABELS[6]}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {paginatedTransactions.length > 0 ? (
-                paginatedTransactions.map((t) => (
+                paginatedTransactions.map((t) => {
+                  const comment = getTransactionCommentDisplay(t.comments);
+                  return (
                   <TableRow key={t.id} data-state={t.needsReview ? 'selected' : ''}>
                     <TableCell>
                       <Checkbox
@@ -419,6 +426,16 @@ export function TransactionsDataTable({
                         )}
                       </div>
                     </TableCell>
+                    <TableCell className="w-[180px] max-w-[220px] align-top">
+                      {comment ? (
+                        <span
+                          className="line-clamp-2 block whitespace-normal break-words text-sm text-muted-foreground"
+                          title={comment}
+                        >
+                          {comment}
+                        </span>
+                      ) : null}
+                    </TableCell>
                     <TableCell className={`text-right font-semibold ${t.amountBase > 0 ? 'text-green-600 dark:text-green-400' : ''}`}>
                       {new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(t.amountBase)}
                     </TableCell>
@@ -452,10 +469,11 @@ export function TransactionsDataTable({
                         </DropdownMenu>
                     </TableCell>
                   </TableRow>
-                ))
+                  );
+                })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={7} className="h-24 text-center">
+                  <TableCell colSpan={8} className="h-24 text-center">
                     No transactions found.
                   </TableCell>
                 </TableRow>

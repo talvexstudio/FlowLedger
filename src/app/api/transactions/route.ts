@@ -26,6 +26,7 @@ import {
   shouldCreateInternalTransferPair,
   validateInternalTransfer,
 } from '@/lib/internal-transfer';
+import { TransactionCommentsValidationError } from '@/lib/transaction-comments';
 
 export async function GET(req: NextRequest) {
   const workspaceId = req.nextUrl.searchParams.get('workspaceId');
@@ -152,7 +153,9 @@ export async function POST(req: NextRequest) {
     const result = await saveTransaction(workspaceId, candidate);
     return NextResponse.json(result);
   } catch (e: unknown) {
-    const status = e instanceof TransferResolutionError ? e.status : 500;
+    const status = e instanceof TransferResolutionError
+      ? e.status
+      : e instanceof TransactionCommentsValidationError ? 400 : 500;
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Request failed' }, { status });
   }
 }

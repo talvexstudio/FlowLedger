@@ -299,6 +299,7 @@ test('CSV MVP fixture validates rows, applies rules, and keeps duplicate and unk
   assert.equal(committed.session.transactionCount, 4);
   assert.equal(committed.transactions.length, 4);
   assert.ok(committed.transactions.every((transaction) => transaction.accountId === accountId));
+  assert.ok(committed.transactions.every((transaction) => transaction.comments === undefined));
   assert.deepEqual(committed.transactions.map((transaction) => transaction.amountBase), [-12.5, 2000, -20, -50]);
 
   const coffee = committed.transactions.find((transaction) => transaction.description === 'COFFEE SHOP');
@@ -500,6 +501,10 @@ test('duplicate identity matching is symmetric without amount/date-only false po
   };
 
   assert.equal(findDuplicateTransactions(candidate, [existingDinner]).length, 1);
+  assert.equal(findDuplicateTransactions(
+    { ...candidate, comments: 'Candidate note' },
+    [{ ...existingDinner, comments: 'Different existing note' }]
+  ).length, 1);
   assert.equal(findDuplicateTransactions(
     { ...candidate, description: 'Unrelated merchant' },
     [existingDinner]

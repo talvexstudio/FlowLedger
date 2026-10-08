@@ -107,6 +107,13 @@ test('rule backfill classifies a potential duplicate without approving or changi
   assert.equal(duplicate.potentialDuplicateMatch, duplicateMatch);
 });
 
+test('rule backfill preserves an existing transaction comment', () => {
+  const commented = transaction({ comments: 'Check invoice' });
+  const patch = applyRuleClassificationToTransaction(commented, rule, categories, [account()]);
+  assert.equal(Object.prototype.hasOwnProperty.call(patch, 'comments'), false);
+  assert.equal({ ...commented, ...patch }.comments, 'Check invoice');
+});
+
 test('the direct unresolved-duplicate approval guard remains intact', () => {
   assert.equal(
     getDuplicateApprovalBlockReason(
