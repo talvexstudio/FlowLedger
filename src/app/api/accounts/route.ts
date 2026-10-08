@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAccounts, saveAccount, archiveAccount, deleteAccount } from '@/lib/services/accounts';
+import { getAccounts, saveAccount, archiveAccount, deleteAccount, restoreAccount } from '@/lib/services/accounts';
 
 export async function GET(req: NextRequest) {
   const workspaceId = req.nextUrl.searchParams.get('workspaceId');
@@ -35,6 +35,23 @@ export async function DELETE(req: NextRequest) {
     } else {
       await deleteAccount(workspaceId, id);
     }
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 400 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { workspaceId, id, action } = body;
+    if (!workspaceId || !id) {
+      return NextResponse.json({ error: 'workspaceId and id required' }, { status: 400 });
+    }
+    if (action !== 'restore') {
+      return NextResponse.json({ error: 'Unsupported account action' }, { status: 400 });
+    }
+    await restoreAccount(workspaceId, id);
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 400 });

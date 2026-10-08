@@ -1,14 +1,15 @@
 'use client';
 
 import React from 'react';
-import { PlusCircle, X } from 'lucide-react';
+import { Archive, ChevronDown, ChevronUp, PlusCircle, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AccountCard } from '@/components/accounts/account-card';
+import { AccountDeleteDialog } from '@/components/accounts/account-delete-dialog';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { useState, useMemo, useCallback } from 'react';
 import type { Account } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import { apiArchiveAccount, apiDeleteAccount, apiSaveAccount } from '@/lib/api';
+import { apiArchiveAccount, apiDeleteAccount, apiRestoreAccount, apiSaveAccount } from '@/lib/api';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
@@ -16,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { accountSchema, type AccountFormValues } from '@/lib/schemas';
 import { calculateAccountBalance } from '@/lib/transaction-reporting';
+import { clearDeletedAccountTarget, splitAccountsByArchiveState } from '@/lib/account-lifecycle';
 
 export default function AccountsPage() {
   const { accounts, transactions, workspaceId, reloadAccounts } = useFlowLedger();
@@ -30,10 +32,20 @@ export default function AccountsPage() {
   const { toast } = useToast();
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Account | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const { activeAccounts, archivedAccounts } = useMemo(
+    () => splitAccountsByArchiveState(accounts || []),
+    [accounts]
+  );
 
   React.useEffect(() => {
     setIsSheetOpen(false);
     setEditingAccount(null);
+    setDeleteTarget(null);
+    setIsDeleting(false);
+    setShowArchived(false);
   }, [workspaceId]);
 
   const handleAddAccount = useCallback(() => {
@@ -84,24 +96,52 @@ export default function AccountsPage() {
     }
   }, [workspaceId, toast, reloadAccounts]);
 
-  const handleDeleteAccount = useCallback(async (account: Account) => {
+  const handleRestoreAccount = useCallback(async (account: Account) => {
     if (!workspaceId || !account.id) return;
     try {
+      await apiRestoreAccount(workspaceId, account.id);
+      toast({
+        title: 'Account Restored',
+        description: `The account "${account.name}" is active again.`,
+      });
+      await reloadAccounts();
+    } catch (error) {
+      console.error('Failed to restore account:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Restore Failed',
+        description: error instanceof Error ? error.message : 'Could not restore the account. Please try again.',
+      });
+    }
+  }, [workspaceId, toast, reloadAccounts]);
+
+  const requestDeleteAccount = useCallback((account: Account) => {
+    setDeleteTarget(account);
+  }, []);
+
+  const handleDeleteAccount = useCallback(async () => {
+    if (!workspaceId || !deleteTarget?.id || isDeleting) return;
+    const account = deleteTarget;
+    setIsDeleting(true);
+    try {
       await apiDeleteAccount(workspaceId, account.id);
+      setDeleteTarget((current) => clearDeletedAccountTarget(current, account.id));
       toast({
         title: 'Account Deleted',
         description: `The account "${account.name}" has been deleted.`,
       });
       await reloadAccounts();
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to delete account:', error);
       toast({
         variant: 'destructive',
         title: 'Delete Failed',
-        description: error.message || 'Could not delete the account. Please try again.',
+        description: error instanceof Error ? error.message : 'Could not delete the account. Please try again.',
       });
+    } finally {
+      setIsDeleting(false);
     }
-  }, [workspaceId, toast, reloadAccounts]);
+  }, [workspaceId, deleteTarget, isDeleting, toast, reloadAccounts]);
 
   const form = useForm<AccountFormValues>({
     resolver: zodResolver(accountSchema),
@@ -290,17 +330,58 @@ export default function AccountsPage() {
       )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {(accounts || []).filter(a => !a.archived).map((account) => (
+        {activeAccounts.map((account) => (
           <AccountCard
             key={account.id}
             account={account}
             balance={balanceByAccountId[account.id] ?? account.openingBalance ?? 0}
             onEdit={() => handleEditAccount(account)}
             onArchive={() => handleArchiveAccount(account)}
-            onDelete={() => handleDeleteAccount(account)}
+            onRestore={() => handleRestoreAccount(account)}
+            onDelete={requestDeleteAccount}
           />
         ))}
       </div>
+
+      {archivedAccounts.length > 0 && (
+        <section className="space-y-4 border-t pt-6">
+          <Button
+            type="button"
+            variant="ghost"
+            className="px-0 hover:bg-transparent"
+            onClick={() => setShowArchived((current) => !current)}
+            aria-expanded={showArchived}
+          >
+            <Archive />
+            Archived accounts ({archivedAccounts.length})
+            {showArchived ? <ChevronUp /> : <ChevronDown />}
+          </Button>
+          {showArchived && (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {archivedAccounts.map((account) => (
+                <AccountCard
+                  key={account.id}
+                  account={account}
+                  balance={balanceByAccountId[account.id] ?? account.openingBalance ?? 0}
+                  onEdit={() => handleEditAccount(account)}
+                  onArchive={() => handleArchiveAccount(account)}
+                  onRestore={() => handleRestoreAccount(account)}
+                  onDelete={requestDeleteAccount}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      <AccountDeleteDialog
+        account={deleteTarget}
+        deleting={isDeleting}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        onConfirm={handleDeleteAccount}
+      />
     </div>
   );
 }

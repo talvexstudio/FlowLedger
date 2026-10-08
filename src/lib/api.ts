@@ -87,6 +87,9 @@ export const apiSaveAccount = (workspaceId: string, data: Partial<Account>) =>
 export const apiArchiveAccount = (workspaceId: string, id: string) =>
   call<{ ok: true }>('/api/accounts', { method: 'DELETE', body: JSON.stringify({ workspaceId, id, action: 'archive' }) });
 
+export const apiRestoreAccount = (workspaceId: string, id: string) =>
+  call<{ ok: true }>('/api/accounts', { method: 'PATCH', body: JSON.stringify({ workspaceId, id, action: 'restore' }) });
+
 export const apiDeleteAccount = (workspaceId: string, id: string) =>
   call<{ ok: true }>('/api/accounts', { method: 'DELETE', body: JSON.stringify({ workspaceId, id }) });
 

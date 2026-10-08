@@ -49,7 +49,19 @@ export const saveAccount = async (workspaceId: string, accountData: Partial<Acco
 export const archiveAccount = async (workspaceId: string, accountId: string) => {
     await assertWorkspaceExists(workspaceId);
     await requireAccount(workspaceId, accountId);
-    await db.collection(accountsCollection(workspaceId)).doc(accountId).update({ archived: true });
+    await db.collection(accountsCollection(workspaceId)).doc(accountId).update({
+        archived: true,
+        updatedAt: new Date(),
+    });
+}
+
+export const restoreAccount = async (workspaceId: string, accountId: string) => {
+    await assertWorkspaceExists(workspaceId);
+    await requireAccount(workspaceId, accountId);
+    await db.collection(accountsCollection(workspaceId)).doc(accountId).update({
+        archived: false,
+        updatedAt: new Date(),
+    });
 }
 
 export const deleteAccount = async (workspaceId: string, accountId: string) => {
