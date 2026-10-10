@@ -8,19 +8,24 @@ import {
   CardTitle,
   CardDescription
 } from '@/components/ui/card';
-import type { MonthlyOverviewPoint } from '@/app/(app)/dashboard/utils';
+import {
+  getOverviewDescription,
+  type DashboardRangeGrouping,
+  type MonthlyOverviewPoint,
+} from '@/app/(app)/dashboard/utils';
 
 type OverviewChartProps = {
   data: MonthlyOverviewPoint[];
+  grouping: DashboardRangeGrouping;
 };
 
-export function OverviewChart({ data }: OverviewChartProps) {
+export function OverviewChart({ data, grouping }: OverviewChartProps) {
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Monthly Overview</CardTitle>
-        <CardDescription>Income vs. Expenses - last 12 months.</CardDescription>
+        <CardTitle>Income vs. Expenses</CardTitle>
+        <CardDescription>{getOverviewDescription(grouping)}</CardDescription>
       </CardHeader>
       <CardContent className="h-80">
         <ResponsiveContainer width="100%" height="100%">

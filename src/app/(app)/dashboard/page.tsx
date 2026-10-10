@@ -22,14 +22,14 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { apiSeedDemoData } from '@/lib/api';
-import { buildRangeOverviewData, buildMonthlyOverviewData, toDate } from '@/app/(app)/dashboard/utils';
-import { isConfirmedExpense, isConfirmedIncome } from '@/lib/transaction-reporting';
+import { buildDashboardReport } from '@/app/(app)/dashboard/utils';
 
 export default function DashboardPage() {
   const { toast } = useToast();
   const { 
     accounts, 
     transactions, 
+    categories,
     workspaceId, 
     reloadAccounts, 
     reloadTransactions 
@@ -92,58 +92,17 @@ export default function DashboardPage() {
     }
   };
 
-  const effectiveTransactions = useMemo(
-    () => transactions.filter((t) => !t.needsReview),
-    [transactions]
+  const dashboardReport = useMemo(
+    () => buildDashboardReport(
+      transactions,
+      categories,
+      dateRange.start,
+      dateRange.end
+    ),
+    [transactions, categories, dateRange]
   );
 
-  const rangeTransactions = useMemo(() => {
-    return effectiveTransactions.filter((t) => {
-      const date = toDate(t.date);
-      return date ? date >= dateRange.start && date <= dateRange.end : false;
-    });
-  }, [effectiveTransactions, dateRange]);
-
-  const { income, expenses, net, savingsRate } = useMemo(() => {
-    const incomeTotal = rangeTransactions
-      .filter(isConfirmedIncome)
-      .reduce((sum, t) => sum + t.amountBase, 0);
-
-    const expenseTotal = rangeTransactions
-      .filter(isConfirmedExpense)
-      .reduce((sum, t) => sum + Math.abs(t.amountBase), 0);
-
-    const netBalance = incomeTotal - expenseTotal;
-    const rate = incomeTotal > 0 ? (netBalance / incomeTotal) * 100 : 0;
-
-    return {
-      income: incomeTotal,
-      expenses: expenseTotal,
-      net: netBalance,
-      savingsRate: rate,
-    };
-  }, [rangeTransactions]);
-
-  const chartData = useMemo(
-    () => buildRangeOverviewData(effectiveTransactions, dateRange.start, dateRange.end),
-    [effectiveTransactions, dateRange]
-  );
-
-  const { avgIncome, avgExpenses, periodSavingsRate } = useMemo(() => {
-    const monthsInWindow = chartData.length || 1;
-    const totalIncome = chartData.reduce((sum, month) => sum + month.income, 0);
-    const totalExpenses = chartData.reduce((sum, month) => sum + month.expenses, 0);
-
-    const averageIncome = totalIncome / monthsInWindow;
-    const averageExpenses = totalExpenses / monthsInWindow;
-    const savingsRate = totalIncome > 0 ? (totalIncome - totalExpenses) / totalIncome : 0;
-
-    return {
-      avgIncome: averageIncome,
-      avgExpenses: averageExpenses,
-      periodSavingsRate: savingsRate,
-    };
-  }, [chartData]);
+  const { totals, averages, overviewData, expenseCategoryData, grouping } = dashboardReport;
 
   const currencyFormatter = useMemo(() => {
     return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
@@ -168,25 +127,25 @@ export default function DashboardPage() {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
           <KpiCard
             title="Total Income"
-            value={`€${income.toFixed(2)}`}
+            value={`€${totals.income.toFixed(2)}`}
             icon={<ArrowUp className="h-4 w-4 text-muted-foreground" />}
             description="Selected period"
           />
           <KpiCard
             title="Total Expenses"
-            value={`€${expenses.toFixed(2)}`}
+            value={`€${totals.expenses.toFixed(2)}`}
             icon={<ArrowDown className="h-4 w-4 text-muted-foreground" />}
             description="Selected period"
           />
           <KpiCard
             title="Net Balance"
-            value={`€${net.toFixed(2)}`}
+            value={`€${totals.net.toFixed(2)}`}
             icon={<DollarSign className="h-4 w-4 text-muted-foreground" />}
             description="Income minus expenses"
           />
           <KpiCard
             title="Savings Rate"
-            value={`${savingsRate.toFixed(1)}%`}
+            value={`${(totals.savingsRate * 100).toFixed(1)}%`}
             icon={<PiggyBank className="h-4 w-4 text-muted-foreground" />}
             description="Net / Income"
           />
@@ -196,19 +155,19 @@ export default function DashboardPage() {
               <BarChart3 className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <p className="text-xs text-muted-foreground">Per data point in selected range</p>
+              <p className="text-xs text-muted-foreground">{averages.description}</p>
               <div className="mt-3 space-y-1 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Income</span>
-                  <span className="font-semibold">{currencyFormatter.format(avgIncome)}</span>
+                  <span className="font-semibold">{currencyFormatter.format(averages.income)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Expenses</span>
-                  <span className="font-semibold">{currencyFormatter.format(avgExpenses)}</span>
+                  <span className="font-semibold">{currencyFormatter.format(averages.expenses)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Savings rate</span>
-                  <span className="font-semibold">{percentFormatter.format(periodSavingsRate)}</span>
+                  <span className="font-semibold">{percentFormatter.format(averages.savingsRate)}</span>
                 </div>
               </div>
             </CardContent>
@@ -216,10 +175,10 @@ export default function DashboardPage() {
         </div>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
           <div className="col-span-12 lg:col-span-4">
-            <OverviewChart data={chartData} />
+            <OverviewChart data={overviewData} grouping={grouping} />
           </div>
           <div className="col-span-12 lg:col-span-3">
-            <ExpensesChart dateRange={dateRange} />
+            <ExpensesChart data={expenseCategoryData} />
           </div>
         </div>
         <div className="grid gap-4">

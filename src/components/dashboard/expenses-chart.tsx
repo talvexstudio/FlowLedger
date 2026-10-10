@@ -8,11 +8,7 @@ import {
   CardTitle,
   CardDescription,
 } from '@/components/ui/card';
-import { useFlowLedger } from '@/hooks/use-flow-ledger';
-import { useMemo } from 'react';
-import { isWithinInterval } from 'date-fns';
-import { toDate } from '@/app/(app)/dashboard/utils';
-import { isConfirmedExpense } from '@/lib/transaction-reporting';
+import type { ExpenseCategoryPoint } from '@/app/(app)/dashboard/utils';
 
 const CATEGORY_COLORS = [
   '#4F46E5',
@@ -25,47 +21,14 @@ const CATEGORY_COLORS = [
 ];
 
 interface ExpensesChartProps {
-  dateRange?: { start: Date; end: Date };
+  data: ExpenseCategoryPoint[];
 }
 
-export function ExpensesChart({ dateRange }: ExpensesChartProps) {
-  const { transactions, categories } = useFlowLedger();
-
-  const { data, total } = useMemo(() => {
-    const expenseData = transactions
-      .filter(t => isConfirmedExpense(t) && t.categoryId)
-      .filter(t => {
-        if (!dateRange) return true;
-        const date = toDate(t.date);
-        return date ? isWithinInterval(date, { start: dateRange.start, end: dateRange.end }) : false;
-      })
-      .reduce((acc, t) => {
-        const categoryId = t.categoryId!;
-        acc[categoryId] = (acc[categoryId] || 0) + Math.abs(t.amountBase);
-        return acc;
-      }, {} as { [key: string]: number });
-
-    const entries = Object.entries(expenseData)
-      .map(([categoryId, value]) => {
-        const category = categories.find(c => c.id === categoryId);
-        return {
-          categoryId,
-          categoryName: category?.name || 'Uncategorized',
-          total: value,
-        };
-      })
-      .filter(entry => entry.total > 0)
-      .sort((a, b) => b.total - a.total);
-
-    const totalExpenses = entries.reduce((sum, entry) => sum + entry.total, 0);
-
-    const finalData = entries.map((entry, index) => ({
-      ...entry,
-      color: CATEGORY_COLORS[index % CATEGORY_COLORS.length],
-    }));
-
-    return { data: finalData, total: totalExpenses };
-  }, [transactions, categories]);
+export function ExpensesChart({ data }: ExpensesChartProps) {
+  const chartData = data.map((entry, index) => ({
+    ...entry,
+    color: CATEGORY_COLORS[index % CATEGORY_COLORS.length],
+  }));
 
 
   return (
@@ -75,7 +38,7 @@ export function ExpensesChart({ dateRange }: ExpensesChartProps) {
         <CardDescription>Breakdown of spending in the selected period.</CardDescription>
       </CardHeader>
       <CardContent className="h-80">
-        {data.length > 0 ? (
+        {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Tooltip
@@ -94,7 +57,7 @@ export function ExpensesChart({ dateRange }: ExpensesChartProps) {
                 wrapperStyle={{ right: -20, lineHeight: '24px' }}
               />
               <Pie
-                data={data}
+                data={chartData}
                 dataKey="total"
                 nameKey="categoryName"
                 cx="50%"
@@ -113,7 +76,7 @@ export function ExpensesChart({ dateRange }: ExpensesChartProps) {
                   ) : null;
                 }}
               >
-                {data.map((entry) => (
+                {chartData.map((entry) => (
                   <Cell key={entry.categoryId} fill={entry.color} />
                 ))}
               </Pie>
