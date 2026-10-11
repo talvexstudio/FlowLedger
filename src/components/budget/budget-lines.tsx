@@ -6,17 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import { Edit, Trash2 } from 'lucide-react';
 import type { BudgetLine, Category, Subcategory, Transaction } from '@/lib/types';
-import { isConfirmedExpense } from '@/lib/transaction-reporting';
-
-interface BudgetRowItem {
-  categoryId: string;
-  categoryName: string;
-  monthlyBudget: number;
-  spentThisMonth: number;
-  progress: number;
-  remaining: number;
-  hasLine: boolean;
-}
+import { buildBudgetPlanningRows } from '@/lib/budget-planning';
 
 interface BudgetLinesProps {
   budgetLines: BudgetLine[];
@@ -37,41 +27,15 @@ export function BudgetLines({
   onEdit,
   onDelete,
 }: BudgetLinesProps) {
-  const rows = useMemo<BudgetRowItem[]>(() => {
-    const expenseCategories = categories.filter(c => c.type === 'expense' || c.type === 'both');
-
-    return expenseCategories.map(category => {
-      const line = budgetLines.find(l => l.categoryId === category.id);
-      const monthlyBudget = line?.userAdjustedMonthly ?? line?.monthlyAverage ?? 0;
-
-      const spentThisMonth = transactions
-        .filter(t =>
-          t.categoryId === category.id &&
-          isConfirmedExpense(t) &&
-          new Date(t.date).getMonth() === selectedMonth &&
-          new Date(t.date).getFullYear() === selectedYear
-        )
-        .reduce((sum, t) => sum + Math.abs(t.amountBase), 0);
-
-      const progress = monthlyBudget > 0 ? Math.min((spentThisMonth / monthlyBudget) * 100, 100) : 0;
-      const remaining = monthlyBudget - spentThisMonth;
-
-      return {
-        categoryId: category.id,
-        categoryName: category.name,
-        monthlyBudget,
-        spentThisMonth,
-        progress,
-        remaining,
-        hasLine: !!line,
-      };
-    }).filter(row => row.spentThisMonth > 0 || row.hasLine);
-  }, [budgetLines, transactions, categories, selectedMonth, selectedYear]);
+  const rows = useMemo(
+    () => buildBudgetPlanningRows(budgetLines, transactions, categories, selectedMonth, selectedYear),
+    [budgetLines, transactions, categories, selectedMonth, selectedYear]
+  );
 
   if (rows.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-6 text-center">
-        No spending or budget lines found for this period. Set a budget on any category to get started.
+        No expense-capable categories are available. Create an expense category before setting a budget.
       </p>
     );
   }
@@ -82,7 +46,7 @@ export function BudgetLines({
         <TableRow>
           <TableHead className="w-[180px]">Category</TableHead>
           <TableHead>Progress</TableHead>
-          <TableHead className="text-right">Spent</TableHead>
+          <TableHead className="text-right">Used</TableHead>
           <TableHead className="text-right">Budget</TableHead>
           <TableHead className="text-right">Remaining</TableHead>
           <TableHead className="w-[80px]"></TableHead>
@@ -93,7 +57,7 @@ export function BudgetLines({
           <TableRow key={row.categoryId}>
             <TableCell className="font-medium">{row.categoryName}</TableCell>
             <TableCell>
-              {row.monthlyBudget > 0 ? (
+              {row.hasBudget ? (
                 <div className="flex items-center gap-3">
                   <Progress
                     value={row.progress}
@@ -105,12 +69,12 @@ export function BudgetLines({
                 <span className="text-sm text-muted-foreground italic">No budget set</span>
               )}
             </TableCell>
-            <TableCell className="text-right">€{row.spentThisMonth.toFixed(2)}</TableCell>
+            <TableCell className="text-right">€{row.used.toFixed(2)}</TableCell>
             <TableCell className="text-right">
-              {row.monthlyBudget > 0 ? `€${row.monthlyBudget.toFixed(2)}` : <span className="text-muted-foreground">—</span>}
+              {row.hasBudget ? `€${row.monthlyBudget.toFixed(2)}` : <span className="text-muted-foreground">—</span>}
             </TableCell>
             <TableCell className={`text-right font-medium ${row.remaining < 0 ? 'text-destructive' : ''}`}>
-              {row.monthlyBudget > 0 ? `€${row.remaining.toFixed(2)}` : <span className="text-muted-foreground">—</span>}
+              {row.hasBudget ? `€${row.remaining.toFixed(2)}` : <span className="text-muted-foreground">—</span>}
             </TableCell>
             <TableCell>
               <div className="flex gap-1 justify-end">
@@ -123,7 +87,7 @@ export function BudgetLines({
                 >
                   <Edit className="h-3.5 w-3.5" />
                 </Button>
-                {row.hasLine && (
+                {row.hasBudget && (
                   <Button
                     size="icon"
                     variant="ghost"

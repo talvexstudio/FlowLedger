@@ -303,6 +303,7 @@ export const validateRestoreReferences = (
       .map((record) => [recordId(record), record])
   );
   const budgetYears = new Set<string>();
+  const budgetLineScopes = new Set<string>();
   for (const budget of budgets.values()) {
     const workspaceId = optionalString(budget, 'workspaceId');
     requireRequiredReference(workspaces, workspaceId, 'A budget references a missing workspace.');
@@ -316,6 +317,16 @@ export const validateRestoreReferences = (
         throw new RestoreError('REFERENTIAL_INTEGRITY_FAILURE', 'A budget line year does not match its budget header.');
       }
       validateCategoryReference(budget, 'A budget line', categories, subcategoryParents, workspaceId, true);
+      const month = typeof budget.month === 'number' ? String(budget.month) : 'legacy';
+      const categoryId = optionalString(budget, 'categoryId') ?? '';
+      const lineScope = `${workspaceId ?? ''}:${String(budget.year)}:${month}:${categoryId}`;
+      if (budgetLineScopes.has(lineScope)) {
+        throw new RestoreError(
+          'REFERENTIAL_INTEGRITY_FAILURE',
+          'More than one budget line exists for the same workspace, year, month, and category.'
+        );
+      }
+      budgetLineScopes.add(lineScope);
     } else {
       const budgetYearKey = `${workspaceId ?? ''}:${String(budget.year)}`;
       if (budgetYears.has(budgetYearKey)) {

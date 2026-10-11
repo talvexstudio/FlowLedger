@@ -12,7 +12,11 @@ import {
   subMonths,
 } from 'date-fns';
 import type { Category, Transaction } from '@/lib/types';
-import { isConfirmedExpense, isConfirmedIncome } from '@/lib/transaction-reporting';
+import {
+  calculateReportingTotals,
+  isConfirmedExpense,
+  isReimbursement,
+} from '@/lib/transaction-reporting';
 
 export const UNCATEGORIZED_EXPENSE_SLICE_ID = '__uncategorized__';
 
@@ -20,6 +24,8 @@ export type DashboardRangeGrouping = 'daily' | 'monthly' | 'quarterly';
 
 export type DashboardTotals = {
   income: number;
+  grossExpenses: number;
+  reimbursements: number;
   expenses: number;
   net: number;
   savingsRate: number;
@@ -28,6 +34,9 @@ export type DashboardTotals = {
 export type ExpenseCategoryPoint = {
   categoryId: string;
   categoryName: string;
+  grossExpense: number;
+  reimbursements: number;
+  netExpense: number;
   total: number;
 };
 
@@ -75,17 +84,17 @@ export function selectDashboardPeriodTransactions(
 }
 
 export function calculateDashboardTotals(
-  selectedPeriodTransactions: Transaction[]
+  selectedPeriodTransactions: Transaction[],
+  categories: Pick<Category, 'id' | 'type'>[]
 ): DashboardTotals {
-  const income = selectedPeriodTransactions
-    .filter(isConfirmedIncome)
-    .reduce((sum, transaction) => sum + transaction.amountBase, 0);
-  const expenses = selectedPeriodTransactions
-    .filter(isConfirmedExpense)
-    .reduce((sum, transaction) => sum + Math.abs(transaction.amountBase), 0);
+  const reportingTotals = calculateReportingTotals(selectedPeriodTransactions, categories);
+  const income = reportingTotals.ordinaryIncome;
+  const expenses = reportingTotals.netExpenses;
   const net = income - expenses;
   return {
     income,
+    grossExpenses: reportingTotals.grossExpenses,
+    reimbursements: reportingTotals.reimbursements,
     expenses,
     net,
     savingsRate: income !== 0 ? net / income : 0,
@@ -107,7 +116,10 @@ export type MonthlyOverviewPoint = {
   expenses: number;
 };
 
-export function buildMonthlyOverviewData(transactions: Transaction[]): MonthlyOverviewPoint[] {
+export function buildMonthlyOverviewData(
+  transactions: Transaction[],
+  categories: Pick<Category, 'id' | 'type'>[]
+): MonthlyOverviewPoint[] {
   const { start, end } = getLast12MonthsRange();
   const months = eachMonthOfInterval({ start, end });
 
@@ -117,13 +129,9 @@ export function buildMonthlyOverviewData(transactions: Transaction[]): MonthlyOv
       return date ? isSameMonth(date, monthDate) : false;
     });
 
-    const income = monthTransactions
-      .filter(isConfirmedIncome)
-      .reduce((sum, t) => sum + t.amountBase, 0);
-
-    const expenses = monthTransactions
-      .filter(isConfirmedExpense)
-      .reduce((sum, t) => sum + Math.abs(t.amountBase), 0);
+    const totals = calculateReportingTotals(monthTransactions, categories);
+    const income = totals.ordinaryIncome;
+    const expenses = totals.netExpenses;
 
     return {
       year: monthDate.getFullYear(),
@@ -137,6 +145,7 @@ export function buildMonthlyOverviewData(transactions: Transaction[]): MonthlyOv
 
 export function buildRangeOverviewData(
   selectedPeriodTransactions: Transaction[],
+  categories: Pick<Category, 'id' | 'type'>[],
   start: Date,
   end: Date,
   grouping = getDashboardRangeGrouping(start, end)
@@ -149,8 +158,9 @@ export function buildRangeOverviewData(
         const date = toDate(t.date);
         return date ? isSameDay(date, day) : false;
       });
-      const income = dayTxs.filter(isConfirmedIncome).reduce((s, t) => s + t.amountBase, 0);
-      const expenses = dayTxs.filter(isConfirmedExpense).reduce((s, t) => s + Math.abs(t.amountBase), 0);
+      const totals = calculateReportingTotals(dayTxs, categories);
+      const income = totals.ordinaryIncome;
+      const expenses = totals.netExpenses;
       return { year: day.getFullYear(), month: day.getMonth(), label: format(day, 'MMM d'), income, expenses };
     });
   }
@@ -163,8 +173,9 @@ export function buildRangeOverviewData(
         const date = toDate(t.date);
         return date ? isSameMonth(date, monthDate) : false;
       });
-      const income = monthTxs.filter(isConfirmedIncome).reduce((s, t) => s + t.amountBase, 0);
-      const expenses = monthTxs.filter(isConfirmedExpense).reduce((s, t) => s + Math.abs(t.amountBase), 0);
+      const totals = calculateReportingTotals(monthTxs, categories);
+      const income = totals.ordinaryIncome;
+      const expenses = totals.netExpenses;
       return { year: monthDate.getFullYear(), month: monthDate.getMonth(), label: format(monthDate, 'MMM yy'), income, expenses };
     });
   }
@@ -179,8 +190,9 @@ export function buildRangeOverviewData(
       return date ? quarterMonths.some(m => isSameMonth(date, m)) : false;
     });
     const firstMonth = quarterMonths[0];
-    const income = quarterTxs.filter(isConfirmedIncome).reduce((s, t) => s + t.amountBase, 0);
-    const expenses = quarterTxs.filter(isConfirmedExpense).reduce((s, t) => s + Math.abs(t.amountBase), 0);
+    const totals = calculateReportingTotals(quarterTxs, categories);
+    const income = totals.ordinaryIncome;
+    const expenses = totals.netExpenses;
     quarters.push({ year: firstMonth.getFullYear(), month: firstMonth.getMonth(), label: `Q${Math.floor(i / 3) + 1} ${firstMonth.getFullYear()}`, income, expenses });
   }
   return quarters;
@@ -188,25 +200,38 @@ export function buildRangeOverviewData(
 
 export function buildExpenseCategoryData(
   selectedPeriodTransactions: Transaction[],
-  categories: Pick<Category, 'id' | 'name'>[]
+  categories: Pick<Category, 'id' | 'name' | 'type'>[]
 ): ExpenseCategoryPoint[] {
   const categoryNames = new Map(categories.map((category) => [category.id, category.name]));
-  const totals = new Map<string, number>();
+  const totals = new Map<string, { grossExpenseCents: number; reimbursementCents: number }>();
 
-  for (const transaction of selectedPeriodTransactions.filter(isConfirmedExpense)) {
+  for (const transaction of selectedPeriodTransactions) {
+    const grossExpense = isConfirmedExpense(transaction);
+    const reimbursement = isReimbursement(transaction, categories);
+    if (!grossExpense && !reimbursement) continue;
     const categoryId = transaction.categoryId || UNCATEGORIZED_EXPENSE_SLICE_ID;
-    totals.set(categoryId, (totals.get(categoryId) ?? 0) + Math.abs(transaction.amountBase));
+    const current = totals.get(categoryId) ?? { grossExpenseCents: 0, reimbursementCents: 0 };
+    if (grossExpense) current.grossExpenseCents += Math.round(Math.abs(transaction.amountBase) * 100);
+    else current.reimbursementCents += Math.round(Math.abs(transaction.amountBase) * 100);
+    totals.set(categoryId, current);
   }
 
   return Array.from(totals.entries())
-    .map(([categoryId, total]) => ({
-      categoryId,
-      categoryName: categoryId === UNCATEGORIZED_EXPENSE_SLICE_ID
-        ? 'Uncategorized'
-        : categoryNames.get(categoryId) ?? 'Unknown category',
-      total,
-    }))
-    .filter((entry) => entry.total > 0)
+    .map(([categoryId, amounts]) => {
+      const grossExpense = amounts.grossExpenseCents / 100;
+      const reimbursements = amounts.reimbursementCents / 100;
+      const netExpense = (amounts.grossExpenseCents - amounts.reimbursementCents) / 100;
+      return {
+        categoryId,
+        categoryName: categoryId === UNCATEGORIZED_EXPENSE_SLICE_ID
+          ? 'Uncategorized'
+          : categoryNames.get(categoryId) ?? 'Unknown category',
+        grossExpense,
+        reimbursements,
+        netExpense,
+        total: netExpense,
+      };
+    })
     .sort((a, b) => b.total - a.total);
 }
 
@@ -229,14 +254,14 @@ export function getOverviewDescription(grouping: DashboardRangeGrouping): string
 
 export function buildDashboardReport(
   transactions: Transaction[],
-  categories: Pick<Category, 'id' | 'name'>[],
+  categories: Pick<Category, 'id' | 'name' | 'type'>[],
   start: Date,
   end: Date
 ) {
   const selectedPeriodTransactions = selectDashboardPeriodTransactions(transactions, start, end);
-  const totals = calculateDashboardTotals(selectedPeriodTransactions);
+  const totals = calculateDashboardTotals(selectedPeriodTransactions, categories);
   const grouping = getDashboardRangeGrouping(start, end);
-  const overviewData = buildRangeOverviewData(selectedPeriodTransactions, start, end, grouping);
+  const overviewData = buildRangeOverviewData(selectedPeriodTransactions, categories, start, end, grouping);
   const expenseCategoryData = buildExpenseCategoryData(selectedPeriodTransactions, categories);
   const pointCount = overviewData.length || 1;
 

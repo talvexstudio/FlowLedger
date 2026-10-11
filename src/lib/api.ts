@@ -26,6 +26,12 @@ import type {
   TransactionBulkDeleteResult,
 } from '@/lib/data-management/transaction-bulk-delete-types';
 import type {
+  BudgetCopyInput,
+  BudgetCopyPreview,
+  BudgetCopyResult,
+  BudgetMonthReference,
+} from '@/lib/data-management/budget-copy';
+import type {
   CreateWorkspaceInput,
   CreateWorkspaceResult,
 } from '@/lib/workspace-lifecycle-types';
@@ -304,8 +310,25 @@ export const apiGetBudget = (workspaceId: string, year: number) =>
 export const apiSaveBudgetLine = (workspaceId: string, year: number, line: Partial<BudgetLine>) =>
   call<BudgetLine>('/api/budgets', { method: 'POST', body: JSON.stringify({ workspaceId, year, line }) });
 
-export const apiDeleteBudgetLine = (workspaceId: string, year: number, categoryId: string) =>
-  call<{ ok: true }>('/api/budgets', { method: 'DELETE', body: JSON.stringify({ workspaceId, year, categoryId }) });
+export const apiDeleteBudgetLine = (workspaceId: string, year: number, month: number, categoryId: string) =>
+  call<{ ok: true }>('/api/budgets', { method: 'DELETE', body: JSON.stringify({ workspaceId, year, month, categoryId }) });
+
+export const apiListBudgetCopySources = (workspaceId: string) =>
+  call<{ sources: BudgetMonthReference[] }>(
+    `/api/budgets/copy?workspaceId=${encodeURIComponent(workspaceId)}`
+  );
+
+export const apiPreviewBudgetCopy = (input: BudgetCopyInput) =>
+  call<BudgetCopyPreview>('/api/budgets/copy', {
+    method: 'POST',
+    body: JSON.stringify({ ...input, previewOnly: true }),
+  });
+
+export const apiCopyBudgets = (input: BudgetCopyInput) =>
+  call<BudgetCopyResult>('/api/budgets/copy', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
 
 // ─── Seed / Demo Data ──────────────────────────────────────────────────────
 export const apiSeedDemoData = (workspaceId: string, clear = false) =>

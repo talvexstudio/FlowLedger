@@ -57,12 +57,16 @@ const findBudgetDocument = async (workspaceId: string, year: number) => {
 const findBudgetLineDocument = async (
   workspaceId: string,
   year: number,
-  categoryId: string
+  categoryId: string,
+  month?: number
 ) => {
   const snapshot = await budgetsCollection(workspaceId).get();
   return snapshot.docs.find((doc: any) => {
     const data = doc.data();
-    return isBudgetLine(data) && data.year === year && data.categoryId === categoryId;
+    return isBudgetLine(data) &&
+      data.year === year &&
+      data.categoryId === categoryId &&
+      data.month === month;
   });
 };
 
@@ -123,6 +127,9 @@ export const saveBudgetLine = async (
   line: Partial<BudgetLine>
 ): Promise<BudgetLine> => {
   await assertWorkspaceExists(workspaceId);
+  if (line.month !== undefined && (!Number.isInteger(line.month) || line.month < 1 || line.month > 12)) {
+    throw new Error('Budget month must be an integer from 1 through 12.');
+  }
   validateCategorySelection(
     await getCategories(workspaceId),
     workspaceId,
@@ -131,7 +138,7 @@ export const saveBudgetLine = async (
   );
   const budget = await ensureBudget(workspaceId, year);
   const categoryId = line.categoryId!;
-  const existing = await findBudgetLineDocument(workspaceId, year, categoryId);
+  const existing = await findBudgetLineDocument(workspaceId, year, categoryId, line.month);
   const { id: _lineId, ...lineData } = line;
   const storedLine: StoredBudgetLine = {
     ...lineData,
@@ -153,10 +160,14 @@ export const saveBudgetLine = async (
 export const deleteBudgetLine = async (
   workspaceId: string,
   year: number,
-  categoryId: string
+  categoryId: string,
+  month?: number
 ): Promise<void> => {
   await assertWorkspaceExists(workspaceId);
-  const existing = await findBudgetLineDocument(workspaceId, year, categoryId);
+  if (month !== undefined && (!Number.isInteger(month) || month < 1 || month > 12)) {
+    throw new Error('Budget month must be an integer from 1 through 12.');
+  }
+  const existing = await findBudgetLineDocument(workspaceId, year, categoryId, month);
   if (existing) {
     await budgetsCollection(workspaceId).doc(existing.id).delete();
   }

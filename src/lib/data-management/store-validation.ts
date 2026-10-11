@@ -160,6 +160,13 @@ export const STORE_VALIDATORS = {
       assertString('budgets', record, index, 'budgetId');
       assertString('budgets', record, index, 'categoryId');
       assertEnum('budgets', record, index, 'type', ['Expense', 'Income']);
+      if (record.month !== undefined) {
+        assertNumber('budgets', record, index, 'month');
+        const month = record.month;
+        if (typeof month !== 'number' || !Number.isInteger(month) || month < 1 || month > 12) {
+          throw new StoreValidationError('budgets', index, 'month must be an integer from 1 through 12');
+        }
+      }
     } else {
       assertNumber('budgets', record, index, 'createdFromSampleMonths');
       assertString('budgets', record, index, 'samplePeriodFrom');

@@ -39,8 +39,9 @@ const transaction = (
 });
 
 const categories = [
-  { id: 'cat-a', name: 'Category A' },
-  { id: 'cat-b', name: 'Category B' },
+  { id: 'cat-a', name: 'Category A', type: 'expense' as const },
+  { id: 'cat-b', name: 'Category B', type: 'expense' as const },
+  { id: 'cat-income', name: 'Salary & Income', type: 'income' as const },
 ];
 
 const toCents = (value: number) => Math.round(value * 100);
@@ -118,8 +119,8 @@ test('uncategorized expenses reconcile while InternalTransfer and pending record
 
   assert.equal(report.totals.expenses, 50);
   assert.deepEqual(report.expenseCategoryData, [
-    { categoryId: 'cat-a', categoryName: 'Category A', total: 30 },
-    { categoryId: UNCATEGORIZED_EXPENSE_SLICE_ID, categoryName: 'Uncategorized', total: 20 },
+    { categoryId: 'cat-a', categoryName: 'Category A', grossExpense: 30, reimbursements: 0, netExpense: 30, total: 30 },
+    { categoryId: UNCATEGORIZED_EXPENSE_SLICE_ID, categoryName: 'Uncategorized', grossExpense: 20, reimbursements: 0, netExpense: 20, total: 20 },
   ]);
   assert.equal(
     report.expenseCategoryData.reduce((sum, slice) => sum + slice.total, 0),
@@ -136,11 +137,49 @@ test('a changed date range produces fresh category data', () => {
   const february = buildDashboardReport(fixtures, categories, new Date(2026, 1, 1), new Date(2026, 1, 28));
 
   assert.deepEqual(january.expenseCategoryData, [
-    { categoryId: 'cat-a', categoryName: 'Category A', total: 10 },
+    { categoryId: 'cat-a', categoryName: 'Category A', grossExpense: 10, reimbursements: 0, netExpense: 10, total: 10 },
   ]);
   assert.deepEqual(february.expenseCategoryData, [
-    { categoryId: 'cat-b', categoryName: 'Category B', total: 25 },
+    { categoryId: 'cat-b', categoryName: 'Category B', grossExpense: 25, reimbursements: 0, netExpense: 25, total: 25 },
   ]);
+});
+
+test('categorized Income in an expense category offsets expenses without double counting income', () => {
+  const report = buildDashboardReport([
+    transaction('salary', new Date(2026, 0, 2, 12), 1_000, 'Income', { categoryId: 'cat-income' }),
+    transaction('ordinary-income', new Date(2026, 0, 2, 12), 200, 'Income'),
+    transaction('expense', new Date(2026, 0, 2, 12), -700, 'Expense', { categoryId: 'cat-a' }),
+    transaction('reimbursement', new Date(2026, 0, 3, 12), 100, 'Income', { categoryId: 'cat-a' }),
+  ], categories, new Date(2026, 0, 1), new Date(2026, 0, 31));
+
+  assert.equal(report.totals.income, 1_200);
+  assert.equal(report.totals.grossExpenses, 700);
+  assert.equal(report.totals.reimbursements, 100);
+  assert.equal(report.totals.expenses, 600);
+  assert.equal(report.totals.net, 600);
+  assert.equal(report.totals.savingsRate, 0.5);
+  assert.deepEqual(report.expenseCategoryData, [{
+    categoryId: 'cat-a',
+    categoryName: 'Category A',
+    grossExpense: 700,
+    reimbursements: 100,
+    netExpense: 600,
+    total: 600,
+  }]);
+});
+
+test('reimbursement-only and over-reimbursed categories preserve zero and negative net values', () => {
+  const report = buildDashboardReport([
+    transaction('zero-expense', new Date(2026, 0, 2), -50, 'Expense', { categoryId: 'cat-a' }),
+    transaction('zero-reimbursement', new Date(2026, 0, 3), 50, 'Income', { categoryId: 'cat-a' }),
+    transaction('negative-reimbursement', new Date(2026, 0, 4), 75, 'Income', { categoryId: 'cat-b' }),
+  ], categories, new Date(2026, 0, 1), new Date(2026, 0, 31));
+
+  assert.equal(report.totals.grossExpenses, 50);
+  assert.equal(report.totals.reimbursements, 125);
+  assert.equal(report.totals.expenses, -75);
+  assert.equal(report.expenseCategoryData.find((item) => item.categoryId === 'cat-a')?.netExpense, 0);
+  assert.equal(report.expenseCategoryData.find((item) => item.categoryId === 'cat-b')?.netExpense, -75);
 });
 
 test('monthly grouping is clipped to the exact selected calendar range', () => {

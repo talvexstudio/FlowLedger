@@ -174,6 +174,8 @@ export type Budget = {
 export type BudgetLine = {
   id: string;
   budgetId: string;
+  /** Calendar month, 1-12. Missing only on legacy lines that apply to every month. */
+  month?: number;
   type: 'Expense' | 'Income';
   categoryId: string;
   subcategoryId: string;

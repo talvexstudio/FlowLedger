@@ -32,11 +32,11 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const body = await req.json();
-    const { workspaceId, year, categoryId } = body;
+    const { workspaceId, year, month, categoryId } = body;
     if (!workspaceId || !year || !categoryId) {
       return NextResponse.json({ error: 'workspaceId, year and categoryId required' }, { status: 400 });
     }
-    await deleteBudgetLine(workspaceId, Number(year), categoryId);
+    await deleteBudgetLine(workspaceId, Number(year), categoryId, month === undefined ? undefined : Number(month));
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });

@@ -23,11 +23,14 @@ import {
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { apiSeedDemoData } from '@/lib/api';
 import { buildDashboardReport } from '@/app/(app)/dashboard/utils';
+import { ExpenseReportDialog } from '@/components/dashboard/expense-report-dialog';
+import { buildExpenseReportModel } from '@/lib/expense-report';
 
 export default function DashboardPage() {
   const { toast } = useToast();
   const { 
-    accounts, 
+    accounts,
+    workspaces,
     transactions, 
     categories,
     workspaceId, 
@@ -36,6 +39,7 @@ export default function DashboardPage() {
   } = useFlowLedger();
 
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [showExpenseReport, setShowExpenseReport] = useState(false);
   const [dateRange, setDateRange] = useState<DashboardDateRange>(getDefaultDateRange);
 
   const loadDemoData = async () => {
@@ -103,6 +107,23 @@ export default function DashboardPage() {
   );
 
   const { totals, averages, overviewData, expenseCategoryData, grouping } = dashboardReport;
+
+  const currentWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
+  const expenseReport = useMemo(
+    () => buildExpenseReportModel(
+      dashboardReport.selectedPeriodTransactions,
+      categories,
+      accounts,
+      {
+        workspaceId: workspaceId ?? '',
+        workspaceName: currentWorkspace?.name ?? 'No workspace',
+        baseCurrency: currentWorkspace?.baseCurrency ?? 'EUR',
+        periodStart: dateRange.start,
+        periodEnd: dateRange.end,
+      }
+    ),
+    [dashboardReport.selectedPeriodTransactions, categories, accounts, workspaceId, currentWorkspace, dateRange]
+  );
 
   const currencyFormatter = useMemo(() => {
     return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
@@ -178,7 +199,7 @@ export default function DashboardPage() {
             <OverviewChart data={overviewData} grouping={grouping} />
           </div>
           <div className="col-span-12 lg:col-span-3">
-            <ExpensesChart data={expenseCategoryData} />
+            <ExpensesChart data={expenseCategoryData} onViewReport={() => setShowExpenseReport(true)} />
           </div>
         </div>
         <div className="grid gap-4">
@@ -202,6 +223,11 @@ export default function DashboardPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <ExpenseReportDialog
+        open={showExpenseReport}
+        onOpenChange={setShowExpenseReport}
+        report={expenseReport}
+      />
     </>
   );
 }

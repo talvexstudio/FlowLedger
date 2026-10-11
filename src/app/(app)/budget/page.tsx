@@ -6,11 +6,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { BudgetLines } from '@/components/budget/budget-lines';
+import { BudgetCopyDialog, type BudgetCopyDialogRequest } from '@/components/budget/budget-copy-dialog';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { useToast } from '@/hooks/use-toast';
 import { apiSaveBudgetLine, apiDeleteBudgetLine } from '@/lib/api';
 import { shiftBudgetMonth } from '@/lib/budget-navigation';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { getPreviousBudgetMonthReference } from '@/lib/budget-planning';
+import { ChevronLeft, ChevronRight, Copy } from 'lucide-react';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -27,10 +29,12 @@ export default function BudgetPage() {
   const [editModal, setEditModal] = useState<{ open: boolean; categoryId: string; categoryName: string; currentAmount: number } | null>(null);
   const [amountInput, setAmountInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [copyDialogRequest, setCopyDialogRequest] = useState<BudgetCopyDialogRequest | null>(null);
 
   useEffect(() => {
     setEditModal(null);
     setAmountInput('');
+    setCopyDialogRequest(null);
   }, [workspaceId]);
 
   const yearOptions = Array.from(new Set([
@@ -84,6 +88,7 @@ export default function BudgetPage() {
       await apiSaveBudgetLine(workspaceId, selectedYear, {
         categoryId: editModal.categoryId,
         budgetId: String(selectedYear),
+        month: selectedMonth + 1,
         type: 'Expense',
         subcategoryId: '',
         userAdjustedMonthly: amount,
@@ -105,12 +110,19 @@ export default function BudgetPage() {
   const handleDeleteBudgetLine = async (categoryId: string) => {
     if (!workspaceId) return;
     try {
-      await apiDeleteBudgetLine(workspaceId, selectedYear, categoryId);
+      await apiDeleteBudgetLine(workspaceId, selectedYear, selectedMonth + 1, categoryId);
       await reloadBudget(selectedYear);
       toast({ title: 'Budget removed', description: 'Budget line has been removed.' });
     } catch (e) {
       toast({ title: 'Delete failed', description: 'Could not remove budget line.', variant: 'destructive' });
     }
+  };
+
+  const handleCopyPreviousMonth = () => {
+    setCopyDialogRequest({
+      preferredSource: getPreviousBudgetMonthReference(selectedMonth, selectedYear),
+      requirePreferredSource: true,
+    });
   };
 
   return (
@@ -143,16 +155,25 @@ export default function BudgetPage() {
                 Spending vs budget for {MONTH_NAMES[selectedMonth]} {selectedYear}.
               </CardDescription>
             </div>
-            <div className="flex items-center gap-1">
-              <Button variant="outline" size="icon" onClick={handlePrevMonth}>
-                <ChevronLeft className="h-4 w-4" />
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setCopyDialogRequest({})} disabled={!workspaceId}>
+                <Copy className="mr-2 h-4 w-4" />
+                Copy budgets
               </Button>
-              <span className="text-sm font-medium w-28 text-center">
-                {MONTH_NAMES[selectedMonth]}
-              </span>
-              <Button variant="outline" size="icon" onClick={handleNextMonth}>
-                <ChevronRight className="h-4 w-4" />
+              <Button variant="outline" size="sm" onClick={handleCopyPreviousMonth} disabled={!workspaceId}>
+                Copy previous month
               </Button>
+              <div className="flex items-center gap-1">
+                <Button variant="outline" size="icon" onClick={handlePrevMonth}>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-sm font-medium w-28 text-center">
+                  {MONTH_NAMES[selectedMonth]}
+                </span>
+                <Button variant="outline" size="icon" onClick={handleNextMonth}>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -202,6 +223,17 @@ export default function BudgetPage() {
           </div>
         </div>
       )}
+
+      {workspaceId ? (
+        <BudgetCopyDialog
+          open={copyDialogRequest !== null}
+          onOpenChange={(open) => { if (!open) setCopyDialogRequest(null); }}
+          workspaceId={workspaceId}
+          target={{ year: selectedYear, month: selectedMonth + 1 }}
+          request={copyDialogRequest ?? undefined}
+          onCopied={() => reloadBudget(selectedYear)}
+        />
+      ) : null}
     </div>
   );
 }
