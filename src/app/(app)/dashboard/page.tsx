@@ -4,6 +4,7 @@ import { KpiCard } from '@/components/dashboard/kpi-card';
 import { OverviewChart } from '@/components/dashboard/overview-chart';
 import { ExpensesChart } from '@/components/dashboard/expenses-chart';
 import { ReviewTransactions } from '@/components/dashboard/review-transactions';
+import { selectTransactionsToReview } from '@/lib/transaction-review';
 import { DashboardDateRangePicker, getDefaultDateRange, type DashboardDateRange } from '@/components/dashboard/date-range-picker';
 import { DollarSign, ArrowUp, ArrowDown, PiggyBank, Sparkles, TriangleAlert, BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -133,7 +134,7 @@ export default function DashboardPage() {
     return new Intl.NumberFormat('de-DE', { style: 'percent', maximumFractionDigits: 1 });
   }, []);
   
-  const transactionsToReview = transactions.filter(t => t.needsReview);
+  const transactionsToReview = selectTransactionsToReview(transactions);
 
   return (
     <>

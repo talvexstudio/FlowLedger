@@ -107,8 +107,25 @@ export const apiDeleteAccount = (workspaceId: string, id: string) =>
 export const apiGetTransactions = (workspaceId: string) =>
   call<Transaction[]>(`/api/transactions?workspaceId=${workspaceId}`);
 
+export const buildTransactionSaveRequest = (
+  workspaceId: string,
+  data: Partial<Transaction>
+): Record<string, unknown> => {
+  const payload: Record<string, unknown> = { workspaceId, ...data };
+  if (Object.prototype.hasOwnProperty.call(data, 'categoryId') && data.categoryId === undefined) {
+    payload.categoryId = null;
+  }
+  if (Object.prototype.hasOwnProperty.call(data, 'subcategoryId') && data.subcategoryId === undefined) {
+    payload.subcategoryId = null;
+  }
+  return payload;
+};
+
 export const apiSaveTransaction = (workspaceId: string, data: Partial<Transaction>) =>
-  call<Transaction>('/api/transactions', { method: 'POST', body: JSON.stringify({ workspaceId, ...data }) });
+  call<Transaction>('/api/transactions', {
+    method: 'POST',
+    body: JSON.stringify(buildTransactionSaveRequest(workspaceId, data)),
+  });
 
 export const apiConfirmTransaction = (workspaceId: string, transactionId: string) =>
   call<{ ok: true }>('/api/transactions', { method: 'PATCH', body: JSON.stringify({ action: 'confirm', workspaceId, transactionId }) });

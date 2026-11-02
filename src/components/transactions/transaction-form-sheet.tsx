@@ -34,6 +34,12 @@ import { TriangleAlert } from 'lucide-react';
 import { getSelectableAccounts, getTransactionTypeChangePatch } from '@/lib/internal-transfer';
 import { TransferResolutionPanel } from './transfer-resolution-panel';
 import { TRANSACTION_COMMENTS_MAX_LENGTH } from '@/lib/transaction-comments';
+import {
+  categorySelectionPatch,
+  NO_SUBCATEGORY_SELECTION,
+  subcategorySelectionPatch,
+  UNCATEGORIZED_SELECTION,
+} from '@/lib/transaction-category-selection';
 
 interface TransactionFormSheetProps {
   isOpen: boolean;
@@ -291,16 +297,19 @@ export function TransactionFormSheet({
     }
   };
   
-  const handleCategoryChange = (categoryId: string) => {
-    form.setValue('categoryId', categoryId, { shouldDirty: true });
-    form.setValue('subcategoryId', undefined, { shouldDirty: true });
+  const handleCategoryChange = (selection: string) => {
+    const patch = categorySelectionPatch(selection);
+    form.setValue('categoryId', patch.categoryId, { shouldDirty: true });
+    form.setValue('subcategoryId', patch.subcategoryId, { shouldDirty: true });
   }
 
-  const handleSubcategoryChange = (subcategoryId: string) => {
-    form.setValue('subcategoryId', subcategoryId, { shouldDirty: true });
+  const handleSubcategoryChange = (selection: string) => {
+    const patch = subcategorySelectionPatch(selection);
+    form.setValue('subcategoryId', patch.subcategoryId, { shouldDirty: true });
+    if (!patch.subcategoryId) return;
     const categoryId = form.getValues('categoryId');
     const category = categories.find((cat) => cat.id === categoryId);
-    const subcategory = category?.subcategories?.find((sub) => sub.id === subcategoryId);
+    const subcategory = category?.subcategories?.find((sub) => sub.id === patch.subcategoryId);
     if (subcategory?.flowType) {
       form.setValue('type', subcategory.flowType, { shouldDirty: true });
     }
@@ -574,13 +583,17 @@ export function TransactionFormSheet({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Category</FormLabel>
-                    <Select onValueChange={handleCategoryChange} value={field.value ?? ''}>
+                    <Select
+                      onValueChange={handleCategoryChange}
+                      value={field.value ?? UNCATEGORIZED_SELECTION}
+                    >
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select a category" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
+                      <SelectItem value={UNCATEGORIZED_SELECTION}>Uncategorized</SelectItem>
                       {activeCategories.map((cat) => (
                         <SelectItem key={cat.id} value={cat.id}>
                           {cat.name}
@@ -600,13 +613,17 @@ export function TransactionFormSheet({
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Subcategory</FormLabel>
-                      <Select onValueChange={handleSubcategoryChange} value={field.value ?? ''}>
+                      <Select
+                        onValueChange={handleSubcategoryChange}
+                        value={field.value ?? NO_SUBCATEGORY_SELECTION}
+                      >
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select a subcategory" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
+                        <SelectItem value={NO_SUBCATEGORY_SELECTION}>No subcategory</SelectItem>
                         {subcategories.map((sub) => (
                           <SelectItem key={sub.id} value={sub.id}>
                             {sub.name}

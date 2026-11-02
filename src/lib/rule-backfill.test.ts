@@ -86,6 +86,25 @@ test('rule backfill completes review when classification was the only review rea
   });
 });
 
+test('category-only rule action clears a stale subcategory and completes classification', () => {
+  const categoryOnlyRule: ClassificationRule = {
+    ...rule,
+    id: 'rule-parent-only',
+    action: { categoryId: 'cat-food', type: 'Expense' },
+  };
+  const patch = applyRuleClassificationToTransaction(
+    transaction({ categoryId: 'cat-food', subcategoryId: 'sub-groceries' }),
+    categoryOnlyRule,
+    categories,
+    [account()]
+  );
+
+  assert.equal(patch.categoryId, 'cat-food');
+  assert.equal(Object.prototype.hasOwnProperty.call(patch, 'subcategoryId'), true);
+  assert.equal(patch.subcategoryId, undefined);
+  assert.equal(patch.needsReview, false);
+});
+
 test('rule backfill classifies a potential duplicate without approving or changing duplicate metadata', () => {
   const duplicateMatch = {
     transactionId: 'tx-existing',

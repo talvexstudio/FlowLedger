@@ -162,6 +162,35 @@ test('new imports use generated stable-token fallback for recurring merchant var
   assert.equal(result.transactions[0].needsReview, false);
 });
 
+test('a category-only rule completes import classification without persisting a subcategory', () => {
+  const categoryOnlyRule: ClassificationRule = {
+    id: 'rule-parent-category',
+    workspaceId,
+    match: { descriptionContains: 'PARENT CATEGORY', accountId },
+    action: { type: 'Expense', categoryId: 'cat-expense' },
+    createdAt: new Date(),
+  };
+  const result = prepareImportTransactions(
+    [{
+      rowNumber: 2,
+      values: {
+        Date: '03/10/2026',
+        Description: 'PARENT CATEGORY PURCHASE',
+        Amount: '-20',
+      },
+    }],
+    mapping,
+    'CSV',
+    { workspaceId, accountId },
+    [categoryOnlyRule],
+    categories
+  );
+
+  assert.equal(result.transactions[0].categoryId, 'cat-expense');
+  assert.equal(result.transactions[0].subcategoryId, undefined);
+  assert.equal(result.transactions[0].needsReview, false);
+});
+
 test('plain import applies InternalTransfer rule semantics but never creates or approves a counterpart', () => {
   const transferRule: ClassificationRule = {
     id: 'rule-atm-transfer',
@@ -638,14 +667,14 @@ test('failed server commit rolls back created transactions and the import sessio
   assert.deepEqual(memory.getTransactions(), []);
 });
 
-test('approval classification guard requires category and required subcategory', () => {
+test('automatic import classification requires a category but treats subcategory as optional', () => {
   assert.equal(
     isTransactionSufficientlyClassified({ type: 'Expense' }, categories),
     false
   );
   assert.equal(
     isTransactionSufficientlyClassified({ type: 'Expense', categoryId: 'cat-expense' }, categories),
-    false
+    true
   );
   assert.equal(
     isTransactionSufficientlyClassified({

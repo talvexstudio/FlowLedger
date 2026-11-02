@@ -65,7 +65,7 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
   const isUnclassified = (transaction: Transaction) => {
     const category = categories.find((candidate) => candidate.id === transaction.categoryId);
     if (!category) return true;
-    if (category.subcategories.length === 0) return false;
+    if (!transaction.subcategoryId) return false;
     return !category.subcategories.some(
       (subcategory) => subcategory.id === transaction.subcategoryId
     );
@@ -81,7 +81,7 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
       await reloadTransactions();
       toast({
         title: "Transaction Approved",
-        description: "The transaction has been successfully categorized.",
+        description: "The transaction has been successfully approved.",
       });
     } catch(error) {
       console.error(error);

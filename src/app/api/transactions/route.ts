@@ -20,7 +20,10 @@ import {
 } from '@/lib/utils/duplicate-utils';
 import { getCategories } from '@/lib/services/categories';
 import { getAccounts } from '@/lib/services/accounts';
-import { isTransactionSufficientlyClassified } from '@/lib/import-processing';
+import {
+  getIndependentReviewBlockReason,
+  validateTransactionClassificationSelection,
+} from '@/lib/transaction-review';
 import {
   normalizeTransactionTypeFields,
   shouldCreateInternalTransferPair,
@@ -51,8 +54,14 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { workspaceId, ...data } = body;
+    const { workspaceId, ...rawData } = body;
     if (!workspaceId) return NextResponse.json({ error: 'workspaceId required' }, { status: 400 });
+
+    const data = {
+      ...rawData,
+      ...(rawData.categoryId === null ? { categoryId: undefined } : {}),
+      ...(rawData.subcategoryId === null ? { subcategoryId: undefined } : {}),
+    };
 
     const current = data.id ? await getTransaction(workspaceId, data.id) : null;
     if (data.id && !current) {
@@ -88,6 +97,7 @@ export async function POST(req: NextRequest) {
     }
 
     let accounts = [] as Awaited<ReturnType<typeof getAccounts>>;
+    let categories = [] as Awaited<ReturnType<typeof getCategories>>;
     if (candidate.type === 'InternalTransfer') {
       accounts = await getAccounts(workspaceId);
       const validation = validateInternalTransfer(candidate, accounts, workspaceId);
@@ -107,6 +117,17 @@ export async function POST(req: NextRequest) {
       if (shouldCreateInternalTransferPair(candidate) && validation.valid) {
         const { source } = await createInternalTransferPair(workspaceId, candidate);
         return NextResponse.json(source);
+      }
+    } else {
+      categories = await getCategories(workspaceId);
+      const classification = validateTransactionClassificationSelection(
+        candidate,
+        categories,
+        accounts,
+        workspaceId
+      );
+      if (!classification.valid) {
+        return NextResponse.json({ error: classification.reason }, { status: 400 });
       }
     }
 
@@ -137,13 +158,20 @@ export async function POST(req: NextRequest) {
             { status: 409 }
           );
         }
-        const categories = await getCategories(workspaceId);
-        if (!isTransactionSufficientlyClassified(candidate, categories, accounts, workspaceId)) {
-          const transferValidation = validateInternalTransfer(candidate, accounts, workspaceId);
+        const independentBlockReason = getIndependentReviewBlockReason(candidate);
+        if (independentBlockReason) {
+          return NextResponse.json({ error: independentBlockReason }, { status: 409 });
+        }
+        if (categories.length === 0) categories = await getCategories(workspaceId);
+        const classification = validateTransactionClassificationSelection(
+          candidate,
+          categories,
+          accounts,
+          workspaceId
+        );
+        if (!classification.valid) {
           return NextResponse.json(
-            { error: transferValidation.valid
-              ? 'Choose a valid category and subcategory before completing review.'
-              : transferValidation.reason },
+            { error: classification.reason },
             { status: 409 }
           );
         }
@@ -199,14 +227,21 @@ export async function PATCH(req: NextRequest) {
           { status: 409 }
         );
       }
+      const independentBlockReason = getIndependentReviewBlockReason(transaction);
+      if (independentBlockReason) {
+        return NextResponse.json({ error: independentBlockReason }, { status: 409 });
+      }
       const categories = await getCategories(workspaceId);
       const accounts = await getAccounts(workspaceId);
-      if (!isTransactionSufficientlyClassified(transaction, categories, accounts, workspaceId)) {
-        const transferValidation = validateInternalTransfer(transaction, accounts, workspaceId);
+      const classification = validateTransactionClassificationSelection(
+        transaction,
+        categories,
+        accounts,
+        workspaceId
+      );
+      if (!classification.valid) {
         return NextResponse.json(
-          { error: transferValidation.valid
-            ? 'Choose a valid category and subcategory before approving this transaction.'
-            : transferValidation.reason },
+          { error: classification.reason },
           { status: 409 }
         );
       }

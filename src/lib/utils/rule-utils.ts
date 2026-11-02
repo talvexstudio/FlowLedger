@@ -112,14 +112,16 @@ export const ruleMatchesTransaction = (
 
 const actionSignature = (rule: ClassificationRule, tx: Partial<Transaction>) => {
   const type = rule.action.type ?? tx.type ?? null;
+  const assignsCategory = Object.prototype.hasOwnProperty.call(rule.action, 'categoryId') &&
+    !!rule.action.categoryId;
   return JSON.stringify({
     type,
     categoryId: type === 'InternalTransfer'
       ? null
-      : rule.action.categoryId ?? tx.categoryId ?? null,
+      : assignsCategory ? rule.action.categoryId : tx.categoryId ?? null,
     subcategoryId: type === 'InternalTransfer'
       ? null
-      : rule.action.subcategoryId ?? tx.subcategoryId ?? null,
+      : assignsCategory ? rule.action.subcategoryId ?? null : tx.subcategoryId ?? null,
     internalDirection: type === 'InternalTransfer'
       ? rule.action.internalDirection ?? tx.internalDirection ?? null
       : null,
@@ -147,10 +149,12 @@ export const applyRulesToTransactionWithResult = (
   }
 
   const action = matchedRules[0].action;
+  const assignsCategory = Object.prototype.hasOwnProperty.call(action, 'categoryId') &&
+    !!action.categoryId;
   const result = normalizeTransactionTypeFields({
     ...tx,
-    categoryId: action.categoryId ?? tx.categoryId,
-    subcategoryId: action.subcategoryId ?? tx.subcategoryId,
+    categoryId: assignsCategory ? action.categoryId : tx.categoryId,
+    subcategoryId: assignsCategory ? action.subcategoryId : tx.subcategoryId,
     type: action.type ?? tx.type,
     internalDirection: action.internalDirection ?? tx.internalDirection,
     destinationAccountId: action.destinationAccountId ?? tx.destinationAccountId,
@@ -192,13 +196,16 @@ export const ruleMatchesTransactionForBackfill = (
 export const transactionAlreadyHasRuleResult = (
   transaction: Transaction,
   rule: ClassificationRule
-) => transaction.type === (rule.action.type ?? transaction.type) &&
-  (!rule.action.categoryId || transaction.categoryId === rule.action.categoryId) &&
-  (!rule.action.subcategoryId || transaction.subcategoryId === rule.action.subcategoryId) &&
+) => {
+  const assignsCategory = !!rule.action.categoryId;
+  return transaction.type === (rule.action.type ?? transaction.type) &&
+  (!assignsCategory || transaction.categoryId === rule.action.categoryId) &&
+  (!assignsCategory || transaction.subcategoryId === rule.action.subcategoryId) &&
   (rule.action.type !== 'InternalTransfer' || (
     transaction.internalDirection === rule.action.internalDirection &&
     transaction.destinationAccountId === rule.action.destinationAccountId
   ));
+};
 
 export const getRuleBackfillCandidates = (
   rule: ClassificationRule,
@@ -218,7 +225,10 @@ export const applyRuleClassificationToTransaction = (
 ): Partial<Transaction> => {
   const updated: Partial<Transaction> = { id: tx.id };
 
-  if (rule.action.categoryId) updated.categoryId = rule.action.categoryId;
+  if (rule.action.categoryId) {
+    updated.categoryId = rule.action.categoryId;
+    updated.subcategoryId = rule.action.subcategoryId;
+  }
 
   if (rule.action.subcategoryId) {
     updated.subcategoryId = rule.action.subcategoryId;
