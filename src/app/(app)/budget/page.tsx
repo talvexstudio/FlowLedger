@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -14,6 +14,9 @@ import { apiSaveBudgetLine, apiDeleteBudgetLine } from '@/lib/api';
 import { shiftBudgetMonth } from '@/lib/budget-navigation';
 import { getPreviousBudgetMonthReference } from '@/lib/budget-planning';
 import { ChevronLeft, ChevronRight, Copy, History } from 'lucide-react';
+import { usePersistedViewState } from '@/hooks/use-persisted-view-state';
+import { isBudgetViewState } from '@/lib/screen-view-state';
+import { getViewStateStorageKey } from '@/lib/view-state';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -21,11 +24,23 @@ const MONTH_NAMES = [
 ];
 
 export default function BudgetPage() {
-  const { workspaces, categories, transactions, budgetLines, budgetYear, workspaceId, reloadBudget } = useFlowLedger();
+  const { workspaces, categories, transactions, budgetLines, workspaceId, reloadBudget } = useFlowLedger();
   const { toast } = useToast();
 
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const defaultBudgetViewState = useMemo(() => ({
+    month: new Date().getMonth(),
+    year: new Date().getFullYear(),
+  }), []);
+  const budgetViewStateKey = workspaceId
+    ? getViewStateStorageKey('budget', workspaceId)
+    : null;
+  const [budgetViewState, setBudgetViewState, budgetViewPersistence] = usePersistedViewState(
+    budgetViewStateKey,
+    defaultBudgetViewState,
+    isBudgetViewState
+  );
+  const selectedMonth = budgetViewState.month;
+  const selectedYear = budgetViewState.year;
 
   const [editModal, setEditModal] = useState<{ open: boolean; categoryId: string; categoryName: string; currentAmount: number } | null>(null);
   const [amountInput, setAmountInput] = useState('');
@@ -49,25 +64,23 @@ export default function BudgetPage() {
   ])).sort();
 
   useEffect(() => {
+    if (!workspaceId || !budgetViewPersistence.restored) return;
     reloadBudget(selectedYear);
-  }, [selectedYear]);
+  }, [budgetViewPersistence.restored, reloadBudget, selectedYear, workspaceId]);
 
   const handlePrevMonth = () => {
     const previous = shiftBudgetMonth({ month: selectedMonth, year: selectedYear }, -1);
-    setSelectedMonth(previous.month);
-    setSelectedYear(previous.year);
+    setBudgetViewState(previous);
   };
 
   const handleNextMonth = () => {
     const next = shiftBudgetMonth({ month: selectedMonth, year: selectedYear }, 1);
-    setSelectedMonth(next.month);
-    setSelectedYear(next.year);
+    setBudgetViewState(next);
   };
 
   const handleYearChange = useCallback((year: string) => {
-    setSelectedYear(Number(year));
-    // useEffect above handles reloadBudget when selectedYear changes
-  }, []);
+    setBudgetViewState((current) => ({ ...current, year: Number(year) }));
+  }, [setBudgetViewState]);
 
   const handleOpenEdit = (categoryId: string, currentAmount: number) => {
     const category = categories.find(c => c.id === categoryId);

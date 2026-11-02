@@ -10,7 +10,7 @@ import { DollarSign, ArrowUp, ArrowDown, PiggyBank, Sparkles, TriangleAlert, Bar
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,6 +26,13 @@ import { apiSeedDemoData } from '@/lib/api';
 import { buildDashboardReport } from '@/app/(app)/dashboard/utils';
 import { ExpenseReportDialog } from '@/components/dashboard/expense-report-dialog';
 import { buildExpenseReportModel } from '@/lib/expense-report';
+import { usePersistedViewState } from '@/hooks/use-persisted-view-state';
+import {
+  fromDateOnlyString,
+  isDashboardViewState,
+  toDateOnlyString,
+} from '@/lib/screen-view-state';
+import { getViewStateStorageKey } from '@/lib/view-state';
 
 export default function DashboardPage() {
   const { toast } = useToast();
@@ -41,7 +48,30 @@ export default function DashboardPage() {
 
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [showExpenseReport, setShowExpenseReport] = useState(false);
-  const [dateRange, setDateRange] = useState<DashboardDateRange>(getDefaultDateRange);
+  const defaultDateRange = useMemo(getDefaultDateRange, []);
+  const defaultDashboardViewState = useMemo(() => ({
+    start: toDateOnlyString(defaultDateRange.start),
+    end: toDateOnlyString(defaultDateRange.end),
+    preset: defaultDateRange.preset,
+  }), [defaultDateRange]);
+  const dashboardViewStateKey = workspaceId
+    ? getViewStateStorageKey('dashboard', workspaceId)
+    : null;
+  const [dashboardViewState, setDashboardViewState] = usePersistedViewState(
+    dashboardViewStateKey,
+    defaultDashboardViewState,
+    isDashboardViewState
+  );
+  const dateRange = useMemo<DashboardDateRange>(() => ({
+    start: fromDateOnlyString(dashboardViewState.start) ?? defaultDateRange.start,
+    end: fromDateOnlyString(dashboardViewState.end) ?? defaultDateRange.end,
+    preset: dashboardViewState.preset,
+  }), [dashboardViewState, defaultDateRange]);
+
+  useEffect(() => {
+    setShowConfirmDialog(false);
+    setShowExpenseReport(false);
+  }, [workspaceId]);
 
   const loadDemoData = async () => {
     if (!workspaceId) {
@@ -140,7 +170,14 @@ export default function DashboardPage() {
     <>
       <div className="flex-1 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <DashboardDateRangePicker value={dateRange} onChange={setDateRange} />
+          <DashboardDateRangePicker
+            value={dateRange}
+            onChange={(range) => setDashboardViewState({
+              start: toDateOnlyString(range.start),
+              end: toDateOnlyString(range.end),
+              preset: range.preset,
+            })}
+          />
           <Button onClick={handleLoadDemoClick} variant="outline">
             <Sparkles className="mr-2 h-4 w-4" />
             Load Demo Data

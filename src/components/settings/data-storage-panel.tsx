@@ -31,6 +31,10 @@ import {
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { persistWorkspaceId } from '@/lib/workspace-selection';
 import { downloadBackup } from '@/lib/data-management/backup-download';
+import {
+  clearAllPersistedViewState,
+  getBrowserViewStateStorage,
+} from '@/lib/view-state';
 
 type RestoreApiError = { error?: { code?: string; message?: string } };
 
@@ -206,6 +210,9 @@ export function DataStoragePanel() {
         title: `${RESET_OPTIONS[resetPreview.operation].title} complete`,
         description: payload.result.cleanupWarning ?? 'FlowLedger data was updated successfully.',
       });
+      if (resetPreview.operation === 'factory_reset') {
+        clearAllPersistedViewState(getBrowserViewStateStorage());
+      }
       window.location.reload();
     } catch (error) {
       toast({

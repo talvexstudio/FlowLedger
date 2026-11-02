@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
@@ -65,6 +65,10 @@ export function DashboardDateRangePicker({ value, onChange }: DateRangePickerPro
     from: value.start,
     to: value.end,
   });
+
+  useEffect(() => {
+    setCalendarRange({ from: value.start, to: value.end });
+  }, [value.start, value.end]);
 
   const handlePresetClick = (preset: DateRangePreset) => {
     if (preset === 'custom') return; // handled via calendar

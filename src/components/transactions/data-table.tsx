@@ -50,13 +50,23 @@ import {
   ALL_CATEGORIES_FILTER_ID,
   getAccountFilterOptions,
   getCategoryFilterOptions,
-  isCategoryFilterSentinel,
   matchesTransactionFilters,
 } from '@/lib/transaction-filtering';
 import {
   getTransactionCommentDisplay,
   TRANSACTION_TABLE_COLUMN_LABELS,
 } from '@/lib/transaction-comments';
+import { usePersistedViewState } from '@/hooks/use-persisted-view-state';
+import {
+  createDefaultTransactionsViewState,
+  fromDateOnlyString,
+  getActiveTransactionFilterCount,
+  isTransactionsViewState,
+  reconcileTransactionsViewState,
+  toDateOnlyString,
+  withTransactionsFilterChange,
+} from '@/lib/screen-view-state';
+import { getViewStateStorageKey } from '@/lib/view-state';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -86,11 +96,16 @@ export function TransactionsDataTable({
   onBulkDelete,
   onExportActivityBackup,
 }: TransactionsDataTableProps) {
-  const { accounts, categories, transactions } = useFlowLedger();
-  const [accountFilter, setAccountFilter] = React.useState<string[]>([]);
-  const [categoryFilter, setCategoryFilter] = React.useState<string[]>([]);
-  const [dateRange, setDateRange] = React.useState<DateRange | undefined>();
-  const [currentPage, setCurrentPage] = React.useState(1);
+  const { accounts, categories, transactions, workspaceId, isLoading } = useFlowLedger();
+  const defaultViewState = React.useMemo(createDefaultTransactionsViewState, []);
+  const viewStateStorageKey = workspaceId
+    ? getViewStateStorageKey('transactions', workspaceId)
+    : null;
+  const [viewState, setViewState, viewStatePersistence] = usePersistedViewState(
+    viewStateStorageKey,
+    defaultViewState,
+    isTransactionsViewState
+  );
   const [openMenuId, setOpenMenuId] = React.useState<string | null>(null);
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false);
@@ -98,7 +113,15 @@ export function TransactionsDataTable({
   const [bulkPreviewing, setBulkPreviewing] = React.useState(false);
   const [bulkDeleting, setBulkDeleting] = React.useState(false);
   const [bulkConfirmed, setBulkConfirmed] = React.useState(false);
-  const [searchQuery, setSearchQuery] = React.useState('');
+  const accountFilter = viewState.accountIds;
+  const categoryFilter = viewState.categoryIds;
+  const currentPage = viewState.page;
+  const searchQuery = viewState.searchQuery;
+  const dateRange = React.useMemo<DateRange | undefined>(() => {
+    const from = fromDateOnlyString(viewState.dateFrom);
+    const to = fromDateOnlyString(viewState.dateTo);
+    return from ? { from, to } : undefined;
+  }, [viewState.dateFrom, viewState.dateTo]);
 
   const getCategoryName = (catId?: string) => categories.find(c => c.id === catId)?.name || 'Uncategorized';
   const getAccountName = (accId: string) => accounts.find(a => a.id === accId)?.name || 'Unknown';
@@ -147,20 +170,31 @@ export function TransactionsDataTable({
   }, [transactions]);
 
   React.useEffect(() => {
-    const availableIds = new Set(activeAccounts.map((account) => account.id));
-    setAccountFilter((current) => current.filter((id) => availableIds.has(id)));
-  }, [activeAccounts]);
+    if (!viewStatePersistence.restored || isLoading) return;
+    const reconciled = reconcileTransactionsViewState(
+      viewState,
+      new Set(activeAccounts.map((account) => account.id)),
+      new Set(categories.map((category) => category.id))
+    );
+    if (
+      reconciled.accountIds.length !== viewState.accountIds.length
+      || reconciled.categoryIds.length !== viewState.categoryIds.length
+    ) {
+      setViewState(reconciled);
+    }
+  }, [
+    activeAccounts,
+    categories,
+    isLoading,
+    setViewState,
+    viewState,
+    viewStatePersistence.restored,
+  ]);
 
   React.useEffect(() => {
-    const availableIds = new Set(categories.map((category) => category.id));
-    setCategoryFilter((current) => current.filter(
-      (id) => isCategoryFilterSentinel(id) || availableIds.has(id)
-    ));
-  }, [categories]);
-
-  React.useEffect(() => {
-    setCurrentPage((page) => clampTransactionPage(page, totalPages));
-  }, [totalPages]);
+    const page = clampTransactionPage(currentPage, totalPages);
+    if (page !== currentPage) setViewState((current) => ({ ...current, page }));
+  }, [currentPage, setViewState, totalPages]);
 
   const reviewBulkDelete = async () => {
     if (selectedIds.length === 0) return;
@@ -192,46 +226,50 @@ export function TransactionsDataTable({
   };
 
   const toggleAccountFilter = (accountId: string) => {
-    setAccountFilter(prev =>
-      prev.includes(accountId)
-        ? prev.filter(id => id !== accountId)
-        : [...prev, accountId]
-    );
+    setViewState((current) => withTransactionsFilterChange(current, {
+      accountIds: current.accountIds.includes(accountId)
+        ? current.accountIds.filter((id) => id !== accountId)
+        : [...current.accountIds, accountId],
+    }));
   };
 
   const toggleCategoryFilter = (categoryId: string) => {
-    setCategoryFilter(prev =>
-      prev.includes(categoryId)
-        ? prev.filter(id => id !== categoryId)
-        : [...prev, categoryId]
-    );
+    setViewState((current) => withTransactionsFilterChange(current, {
+      categoryIds: current.categoryIds.includes(categoryId)
+        ? current.categoryIds.filter((id) => id !== categoryId)
+        : [...current.categoryIds, categoryId],
+    }));
   }
 
   const clearFilters = () => {
-    setAccountFilter([]);
-    setCategoryFilter([]);
-    setDateRange(undefined);
-    setCurrentPage(1);
+    viewStatePersistence.clear();
   };
   
-  const activeFiltersCount = [accountFilter, categoryFilter, dateRange].filter(f => f && (Array.isArray(f) ? f.length > 0 : f.from)).length;
+  const activeFiltersCount = getActiveTransactionFilterCount(viewState);
+  const hasActiveFilters = activeFiltersCount > 0;
 
   return (
-    <Card>
+    <Card className={hasActiveFilters ? 'border-primary/50 bg-primary/[0.03]' : undefined}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
         <div>
           <CardTitle>All Transactions</CardTitle>
           <CardDescription>
             {filteredTransactions.length} transaction(s) found.
           </CardDescription>
+          {hasActiveFilters && (
+            <p className="mt-2 text-sm font-medium text-primary" role="status">
+              Filters active · {activeFiltersCount}
+            </p>
+          )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
             <Input
               placeholder="Search description..."
               value={searchQuery}
               onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setCurrentPage(1);
+                setViewState((current) => withTransactionsFilterChange(current, {
+                  searchQuery: e.target.value,
+                }));
               }}
               className="max-w-xs"
             />
@@ -263,14 +301,24 @@ export function TransactionsDataTable({
                   mode="range"
                   defaultMonth={dateRange?.from}
                   selected={dateRange}
-                  onSelect={setDateRange}
+                  onSelect={(range) => setViewState((current) => withTransactionsFilterChange(current, {
+                    dateFrom: range?.from ? toDateOnlyString(range.from) : undefined,
+                    dateTo: range?.to ? toDateOnlyString(range.to) : undefined,
+                  }))}
                   numberOfMonths={2}
                 />
               </PopoverContent>
             </Popover>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="relative">
+              <Button
+                variant={hasActiveFilters ? 'secondary' : 'outline'}
+                size="sm"
+                className="relative"
+                aria-label={hasActiveFilters
+                  ? `Filter transactions, ${activeFiltersCount} active filters`
+                  : 'Filter transactions'}
+              >
                 <ListFilter className="mr-2 h-4 w-4" />
                 Filter
                 {activeFiltersCount > 0 && (
@@ -291,7 +339,7 @@ export function TransactionsDataTable({
                               ? accountFilter.length === 0
                               : accountFilter.includes(option.id)}
                             onCheckedChange={() => option.id === ALL_ACCOUNTS_FILTER_ID
-                              ? setAccountFilter([])
+                              ? setViewState((current) => withTransactionsFilterChange(current, { accountIds: [] }))
                               : toggleAccountFilter(option.id)}
                         >
                             {option.label}
@@ -309,7 +357,7 @@ export function TransactionsDataTable({
                               ? categoryFilter.length === 0
                               : categoryFilter.includes(option.id)}
                             onCheckedChange={() => option.id === ALL_CATEGORIES_FILTER_ID
-                              ? setCategoryFilter([])
+                              ? setViewState((current) => withTransactionsFilterChange(current, { categoryIds: [] }))
                               : toggleCategoryFilter(option.id)}
                         >
                             {option.label}
@@ -319,7 +367,7 @@ export function TransactionsDataTable({
               </DropdownMenuSub>
             </DropdownMenuContent>
           </DropdownMenu>
-          {activeFiltersCount > 0 && (
+          {hasActiveFilters && (
             <Button variant="ghost" size="sm" onClick={clearFilters}>
               <X className="mr-2 h-4 w-4" />
               Clear filters
@@ -489,7 +537,10 @@ export function TransactionsDataTable({
                 <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    onClick={() => setViewState((current) => ({
+                      ...current,
+                      page: Math.max(1, current.page - 1),
+                    }))}
                     disabled={currentPage === 1}
                 >
                     <ChevronLeft className="h-4 w-4" />
@@ -498,7 +549,10 @@ export function TransactionsDataTable({
                 <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    onClick={() => setViewState((current) => ({
+                      ...current,
+                      page: Math.min(totalPages, current.page + 1),
+                    }))}
                     disabled={currentPage === totalPages || totalPages === 0}
                 >
                     <span>Next</span>

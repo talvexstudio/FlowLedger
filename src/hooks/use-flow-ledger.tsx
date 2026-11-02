@@ -26,6 +26,10 @@ import {
 } from '@/lib/workspace-client-state';
 import type { CreateWorkspaceInput } from '@/lib/workspace-lifecycle-types';
 import type { WorkspaceDeletionResult } from '@/lib/data-management/workspace-deletion-types';
+import {
+  clearWorkspaceViewState,
+  getBrowserViewStateStorage,
+} from '@/lib/view-state';
 
 interface FlowLedgerContextType {
   workspaces: Workspace[];
@@ -135,6 +139,7 @@ export const FlowLedgerProvider = ({ children }: { children: ReactNode }) => {
 
   const deleteWorkspace = useCallback(async (workspaceIdToDelete: string) => {
     const result = await apiDeleteWorkspace(workspaceIdToDelete);
+    clearWorkspaceViewState(getBrowserViewStateStorage(), workspaceIdToDelete);
     const next = applyWorkspaceDeletion(workspacesRef.current, workspaceIdRef.current, result);
     workspacesRef.current = next.workspaces;
     setWorkspaces(next.workspaces);
