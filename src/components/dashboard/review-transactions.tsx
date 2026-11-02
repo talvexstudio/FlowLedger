@@ -18,11 +18,10 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Check, Edit, MoreVertical } from 'lucide-react';
+import { Check, Edit, Trash2 } from 'lucide-react';
 import type { ClassificationRule, Transaction } from '@/lib/types';
 import { TransactionFormSheet } from '../transactions/transaction-form-sheet';
 import { useToast } from '@/hooks/use-toast';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import {
   apiConfirmTransaction,
@@ -39,6 +38,7 @@ import {
   getInternalTransferPairingStatus,
   validateInternalTransfer,
 } from '@/lib/internal-transfer';
+import { TransactionDeleteDialog } from '@/components/transactions/transaction-delete-dialog';
 
 interface ReviewTransactionsProps {
   transactions: Transaction[];
@@ -48,6 +48,7 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
   const { toast } = useToast();
   const { categories, accounts, reloadTransactions, workspaceId, transactions } = useFlowLedger();
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
   const [backfillCandidates, setBackfillCandidates] = useState<Transaction[]>([]);
   const [pendingRule, setPendingRule] = useState<(ClassificationRule & { categoryName?: string; subcategoryName?: string }) | null>(null);
   const [ruleDraftTransaction, setRuleDraftTransaction] = useState<Transaction | null>(null);
@@ -193,6 +194,7 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
 
   useEffect(() => {
     setEditingTransaction(null);
+    setDeleteTarget(null);
     setBackfillCandidates([]);
     setPendingRule(null);
     setRuleDraftTransaction(null);
@@ -248,6 +250,10 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
           onOpenChange={(open) => { if (!open) setRuleDraftTransaction(null); }}
           onCreated={handleRuleCreated}
         />
+        <TransactionDeleteDialog
+          transaction={deleteTarget}
+          onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        />
       </>
     );
   }
@@ -287,7 +293,7 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
                 <TableHead>Description</TableHead>
                 <TableHead>Category</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
-                <TableHead className="w-24 text-right">Actions</TableHead>
+                <TableHead className="w-32 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -337,38 +343,26 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
                   </TableCell>
                   <TableCell className={`text-right font-semibold ${transaction.amountBase > 0 ? 'text-green-600' : ''}`}>€{transaction.amountBase.toFixed(2)}</TableCell>
                   <TableCell className="text-right">
-                    <div className="hidden md:flex items-center justify-end">
+                    <div className="flex items-center justify-end">
+                      <Button variant="ghost" size="icon" onClick={() => setEditingTransaction(transaction)}>
+                          <Edit className="h-4 w-4 text-primary" />
+                          <span className="sr-only">Edit</span>
+                      </Button>
                       {!transaction.isPotentialDuplicate && !requiresTransferDetails(transaction) && (
                         <Button variant="ghost" size="icon" onClick={() => handleApprove(transaction.id)}>
                             <Check className="h-4 w-4 text-green-500" />
                             <span className="sr-only">Approve</span>
                         </Button>
                       )}
-                      <Button variant="ghost" size="icon" onClick={() => setEditingTransaction(transaction)}>
-                          <Edit className="h-4 w-4 text-primary" />
-                          <span className="sr-only">Edit</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => setDeleteTarget(transaction)}
+                      >
+                          <Trash2 className="h-4 w-4" />
+                          <span className="sr-only">Delete</span>
                       </Button>
-                    </div>
-                    <div className="md:hidden">
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon">
-                                    <MoreVertical className="h-4 w-4" />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                {!transaction.isPotentialDuplicate && !requiresTransferDetails(transaction) && (
-                                  <DropdownMenuItem onClick={() => handleApprove(transaction.id)}>
-                                      <Check className="mr-2 h-4 w-4 text-green-500" />
-                                      Approve
-                                  </DropdownMenuItem>
-                                )}
-                                <DropdownMenuItem onClick={() => setEditingTransaction(transaction)}>
-                                    <Edit className="mr-2 h-4 w-4 text-primary" />
-                                    Edit
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -395,6 +389,10 @@ export function ReviewTransactions({ transactions: initialTransactions }: Review
         transactions={transactions}
         onOpenChange={(open) => { if (!open) setRuleDraftTransaction(null); }}
         onCreated={handleRuleCreated}
+      />
+      <TransactionDeleteDialog
+        transaction={deleteTarget}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
       />
     </>
   );

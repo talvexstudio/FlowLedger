@@ -8,7 +8,6 @@ import type { ClassificationRule, Transaction } from "@/lib/types";
 import {
   apiSaveTransaction,
   apiConfirmTransaction,
-  apiDeleteTransaction,
   apiPreviewTransactionBulkDelete,
   apiBulkDeleteTransactions,
   apiGetRules,
@@ -21,9 +20,9 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { PlusCircle } from "lucide-react";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { RuleBackfillPanel } from "@/components/transactions/rule-backfill-panel";
 import { RuleCreationDialog } from "@/components/transactions/rule-creation-dialog";
+import { TransactionDeleteDialog } from '@/components/transactions/transaction-delete-dialog';
 import { preflightRuleBackfill, type TransferBackfillDecision } from "@/lib/rule-backfill";
 
 
@@ -31,7 +30,7 @@ export default function TransactionsPage() {
     const { toast } = useToast();
     const { categories, accounts, reloadTransactions, workspaceId, transactions } = useFlowLedger();
     const [sheetState, setSheetState] = useState<{ open: boolean; transaction: Partial<Transaction> | null }>({ open: false, transaction: null });
-    const [deleteState, setDeleteState] = useState<{ open: boolean; transaction: Transaction | null }>({ open: false, transaction: null });
+    const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
     const [backfillCandidates, setBackfillCandidates] = useState<Transaction[]>([]);
     const [pendingRule, setPendingRule] = useState<(ClassificationRule & { categoryName?: string; subcategoryName?: string }) | null>(null);
     const [ruleDraftTransaction, setRuleDraftTransaction] = useState<Transaction | null>(null);
@@ -46,29 +45,8 @@ export default function TransactionsPage() {
     }
 
     const handleDelete = (transaction: Transaction) => {
-        setDeleteState({ open: true, transaction });
+        setDeleteTarget(transaction);
     }
-
-    const handleConfirmDelete = async () => {
-        if (!workspaceId || !deleteState.transaction) return;
-        try {
-            await apiDeleteTransaction(workspaceId, deleteState.transaction.id);
-            await reloadTransactions();
-            toast({
-              title: "Transaction Deleted",
-              description: "The transaction has been successfully removed.",
-            });
-        } catch (error) {
-            console.error(error);
-            toast({
-                variant: 'destructive',
-                title: 'Delete failed',
-                description: 'Could not delete the transaction.',
-            });
-        } finally {
-            setDeleteState({ open: false, transaction: null });
-        }
-    };
     
     const handleSave = async (updatedTransaction: Partial<Transaction>) => {
       if (!workspaceId) return;
@@ -101,7 +79,7 @@ export default function TransactionsPage() {
 
     useEffect(() => {
         setSheetState({ open: false, transaction: null });
-        setDeleteState({ open: false, transaction: null });
+        setDeleteTarget(null);
         setBackfillCandidates([]);
         setPendingRule(null);
         setRuleDraftTransaction(null);
@@ -345,22 +323,10 @@ export default function TransactionsPage() {
         onOpenChange={(open) => { if (!open) setRuleDraftTransaction(null); }}
         onCreated={handleRuleCreated}
       />
-      <AlertDialog open={deleteState.open} onOpenChange={(open) => { if (!open) setDeleteState({ open: false, transaction: null })}}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this transaction?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the transaction.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive hover:bg-destructive/90">
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <TransactionDeleteDialog
+        transaction={deleteTarget}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+      />
     </>
   );
 }
