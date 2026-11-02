@@ -221,8 +221,12 @@ test('a rule-created InternalTransfer stays in review and clears categories', ()
   const rule: ClassificationRule = {
     id: 'rule-transfer',
     workspaceId: 'ws1',
-    match: { descriptionContains: 'move' },
-    action: { type: 'InternalTransfer' },
+    match: { descriptionContains: 'move', accountId: 'acc-a' },
+    action: {
+      type: 'InternalTransfer',
+      internalDirection: 'Out',
+      destinationAccountId: 'acc-b',
+    },
     createdAt: new Date(),
   };
   const classified = applyRulesToTransaction({
@@ -267,8 +271,12 @@ test('import preparation keeps a rule-suggested InternalTransfer in review', () 
   const rule: ClassificationRule = {
     id: 'rule-transfer',
     workspaceId: 'ws1',
-    match: { descriptionContains: 'move' },
-    action: { type: 'InternalTransfer' },
+    match: { descriptionContains: 'move', accountId: 'acc-a' },
+    action: {
+      type: 'InternalTransfer',
+      internalDirection: 'Out',
+      destinationAccountId: 'acc-b',
+    },
     createdAt: new Date(),
   };
   const prepared = prepareImportTransactions(rows, {

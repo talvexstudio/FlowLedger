@@ -514,7 +514,8 @@ export default function ImportPage() {
         fileType,
         { workspaceId, accountId: targetAccountId },
         rules,
-        categories
+        categories,
+        accounts
       );
       const rejectedRows = [...parsedFile.rejectedRows, ...prepared.rejectedRows]
         .sort((a, b) => a.rowNumber - b.rowNumber);

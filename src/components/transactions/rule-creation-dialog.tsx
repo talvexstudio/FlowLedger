@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { apiSaveRule } from '@/lib/api';
 import { createRuleDraftFromTransaction, ruleDataFromDraft, validateRuleDraft } from '@/lib/rule-draft';
 import type { Account, Category, ClassificationRule, Subcategory, Transaction } from '@/lib/types';
-import { getRuleBackfillCandidates } from '@/lib/utils/rule-utils';
+import { getRuleBackfillCandidateResult } from '@/lib/utils/rule-utils';
 
 type RuleCreationDialogProps = {
   transaction: Transaction | null;
@@ -86,15 +86,21 @@ export function RuleCreationDialog({
             }
           : initialDraft.action,
       };
-      validateRuleDraft(draft, workspaceId, accounts);
+      validateRuleDraft(draft, workspaceId, accounts, categories);
       const created = await apiSaveRule(
         workspaceId,
         ruleDataFromDraft(draft, transaction.id, workspaceId)
       );
-      onCreated(
+      const backfill = getRuleBackfillCandidateResult(
         created,
-        getRuleBackfillCandidates(created, transactions, transaction.id)
+        transactions,
+        { workspaceId, accounts, categories },
+        transaction.id
       );
+      if (!backfill.validity.valid) {
+        throw new Error('The saved rule is not actionable. Review it in Rules Settings.');
+      }
+      onCreated(created, backfill.candidates);
       onOpenChange(false);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Could not create the rule.');

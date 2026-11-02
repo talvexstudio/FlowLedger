@@ -368,7 +368,8 @@ export const prepareImportTransactions = (
   fileType: ImportFileType,
   context: ImportContext,
   rules: ClassificationRule[],
-  categories: ImportCategories
+  categories: ImportCategories,
+  accounts?: Account[]
 ) => {
   const transactions: Partial<Transaction>[] = [];
   const rejectedRows: ImportRejectedRow[] = [];
@@ -379,7 +380,11 @@ export const prepareImportTransactions = (
       rejectedRows.push(built.rejected);
       continue;
     }
-    const withRules = applyRulesToTransaction(built.transaction, rules);
+    const withRules = applyRulesToTransaction(
+      built.transaction,
+      rules,
+      accounts ? { workspaceId: context.workspaceId, accounts, categories } : undefined
+    );
     const classified = applyDefaultTypeFromSubcategory(withRules, categories);
     const hasImportSafeType = classified.type === 'Expense' || classified.type === 'Income';
     transactions.push({

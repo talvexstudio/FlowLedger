@@ -76,7 +76,11 @@ export default function TransactionsPage() {
             const rules = updatedTransaction.id ? [] : await apiGetRules(workspaceId);
             const txToSave = updatedTransaction.id
               ? updatedTransaction
-              : applyRulesToTransaction(updatedTransaction, rules);
+              : applyRulesToTransaction(updatedTransaction, rules, {
+                  workspaceId,
+                  accounts,
+                  categories,
+                });
 
             const saved = await apiSaveTransaction(workspaceId, txToSave);
             await reloadTransactions();

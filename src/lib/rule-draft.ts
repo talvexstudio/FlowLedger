@@ -1,5 +1,6 @@
-import type { Account, ClassificationRule, Transaction } from './types';
+import type { Account, Category, ClassificationRule, Subcategory, Transaction } from './types';
 import { suggestStableDescriptionPattern } from './utils/rule-utils';
+import { describeRuleValidity, validateRuleAction } from './rule-validity';
 
 export type RuleDraft = {
   originalDescription: string;
@@ -33,31 +34,19 @@ export const createRuleDraftFromTransaction = (transaction: Transaction): RuleDr
 export const validateRuleDraft = (
   draft: RuleDraft,
   workspaceId: string,
-  accounts: Account[]
+  accounts: Account[],
+  categories?: (Category & { subcategories: Subcategory[] })[]
 ) => {
   if (!draft.descriptionContains.trim()) {
     throw new Error('Description contains is required.');
   }
-  const account = accounts.find((candidate) => candidate.id === draft.accountId);
-  if (!account || account.workspaceId !== workspaceId) {
-    throw new Error('The rule account does not belong to this workspace.');
-  }
-  if (draft.action.type !== 'InternalTransfer') return;
-  if (draft.action.internalDirection !== 'In' && draft.action.internalDirection !== 'Out') {
-    throw new Error('Choose whether matching transfers are entering or leaving this account.');
-  }
-  if (!draft.action.destinationAccountId) {
-    throw new Error('Choose a counterpart account for matching transfers.');
-  }
-  if (draft.action.destinationAccountId === draft.accountId) {
-    throw new Error('The counterpart account must be different from the rule account.');
-  }
-  const counterpart = accounts.find(
-    (candidate) => candidate.id === draft.action.destinationAccountId
-  );
-  if (!counterpart || counterpart.workspaceId !== workspaceId) {
-    throw new Error('The counterpart account does not belong to this workspace.');
-  }
+  const validity = validateRuleAction({
+    workspaceId,
+    match: { accountId: draft.accountId, matchMode: draft.matchMode },
+    action: draft.action,
+    createdAt: new Date(),
+  }, { workspaceId, accounts, categories });
+  if (!validity.valid) throw new Error(describeRuleValidity(validity));
 };
 
 export const ruleDataFromDraft = (

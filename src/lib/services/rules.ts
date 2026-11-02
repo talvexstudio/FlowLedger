@@ -1,9 +1,9 @@
 import { db } from "./firestore";
 import type { Category, ClassificationRule, Subcategory, Transaction } from "../types";
-import { requireAccount } from './accounts';
+import { getAccounts } from './accounts';
 import { getCategories } from './categories';
-import { validateCategorySelection } from '../category-ownership';
 import { assertWorkspaceDocumentExists, assertWorkspaceExists } from './workspace-integrity';
+import { describeRuleValidity, validateRuleAction } from '../rule-validity';
 import {
   applyRuleClassificationToTransaction as applyRuleClassification,
   applyRulesToTransaction as applyRules,
@@ -27,38 +27,12 @@ export const saveRule = async (
   data: ClassificationRule | Omit<ClassificationRule, "id">
 ): Promise<ClassificationRule> => {
   await assertWorkspaceExists(workspaceId);
-  if (data.match.accountId) {
-    await requireAccount(workspaceId, data.match.accountId);
-  }
-  if (data.match.matchMode && data.match.matchMode !== 'contains' && data.match.matchMode !== 'starts_with') {
-    throw new Error('Unsupported description match mode.');
-  }
-  if (data.action.type === 'InternalTransfer') {
-    if (!data.match.accountId) {
-      throw new Error('An InternalTransfer rule must be scoped to an account.');
-    }
-    if (data.action.internalDirection !== 'In' && data.action.internalDirection !== 'Out') {
-      throw new Error('Choose an InternalTransfer direction.');
-    }
-    if (!data.action.destinationAccountId) {
-      throw new Error('Choose an InternalTransfer counterpart account.');
-    }
-    if (data.action.destinationAccountId === data.match.accountId) {
-      throw new Error('The counterpart account must be different from the rule account.');
-    }
-    await requireAccount(workspaceId, data.action.destinationAccountId);
-    if (data.action.categoryId || data.action.subcategoryId) {
-      throw new Error('InternalTransfer rules cannot assign a category or subcategory.');
-    }
-  }
-  if (data.action.categoryId || data.action.subcategoryId) {
-    validateCategorySelection(
-      await getCategories(workspaceId),
-      workspaceId,
-      data.action.categoryId,
-      data.action.subcategoryId
-    );
-  }
+  const [accounts, categories] = await Promise.all([
+    getAccounts(workspaceId),
+    getCategories(workspaceId),
+  ]);
+  const validity = validateRuleAction(data, { workspaceId, accounts, categories });
+  if (!validity.valid) throw new Error(describeRuleValidity(validity));
   const coll = db.collection(rulesCollection(workspaceId));
   if ("id" in data && data.id) {
     await assertWorkspaceDocumentExists(workspaceId, 'rules', data.id, 'Rule');

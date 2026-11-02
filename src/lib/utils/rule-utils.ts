@@ -3,6 +3,12 @@
 import type { Account, Category, ClassificationRule, Subcategory, Transaction } from '@/lib/types';
 import { normalizeTransactionTypeFields } from '@/lib/internal-transfer';
 import { needsReviewAfterClassification } from '@/lib/transaction-review';
+import {
+  getActionableRules,
+  validateRuleAction,
+  type RuleValidityContext,
+  type RuleValidityResult,
+} from '@/lib/rule-validity';
 
 export type RuleMatchMethod = 'literal' | 'stable-token';
 
@@ -11,6 +17,11 @@ export type RuleApplicationResult = {
   matchedRules: ClassificationRule[];
   conflict: boolean;
   conflictReason?: string;
+};
+
+export type RuleBackfillCandidateResult = {
+  candidates: Transaction[];
+  validity: RuleValidityResult;
 };
 
 type DescriptionToken = {
@@ -133,9 +144,11 @@ const actionSignature = (rule: ClassificationRule, tx: Partial<Transaction>) => 
 
 export const applyRulesToTransactionWithResult = (
   tx: Partial<Transaction>,
-  rules: ClassificationRule[]
+  rules: ClassificationRule[],
+  validityContext: RuleValidityContext = {}
 ): RuleApplicationResult => {
-  const matchedRules = rules.filter((rule) => ruleMatchesTransaction(rule, tx) !== null);
+  const matchedRules = getActionableRules(rules, validityContext)
+    .filter((rule) => ruleMatchesTransaction(rule, tx) !== null);
   if (matchedRules.length === 0) {
     return { transaction: { ...tx }, matchedRules, conflict: false };
   }
@@ -170,8 +183,9 @@ export const applyRulesToTransactionWithResult = (
 
 export const applyRulesToTransaction = (
   tx: Partial<Transaction>,
-  rules: ClassificationRule[]
-): Partial<Transaction> => applyRulesToTransactionWithResult(tx, rules).transaction;
+  rules: ClassificationRule[],
+  validityContext: RuleValidityContext = {}
+): Partial<Transaction> => applyRulesToTransactionWithResult(tx, rules, validityContext).transaction;
 
 export const tokenizeDescription = (text: string): string[] =>
   stableDescriptionTokens(text).map((token) => token.normalized.toLocaleLowerCase());
@@ -210,12 +224,33 @@ export const transactionAlreadyHasRuleResult = (
 export const getRuleBackfillCandidates = (
   rule: ClassificationRule,
   transactions: Transaction[],
+  excludedTransactionId?: string,
+  validityContext: RuleValidityContext = {}
+) => getRuleBackfillCandidateResult(
+  rule,
+  transactions,
+  validityContext,
+  excludedTransactionId
+).candidates;
+
+export const getRuleBackfillCandidateResult = (
+  rule: ClassificationRule,
+  transactions: Transaction[],
+  validityContext: RuleValidityContext = {},
   excludedTransactionId?: string
-) => transactions.filter((transaction) =>
-  transaction.id !== excludedTransactionId &&
-  ruleMatchesTransactionForBackfill(rule, transaction) &&
-  !transactionAlreadyHasRuleResult(transaction, rule)
-);
+): RuleBackfillCandidateResult => {
+  const validity = validateRuleAction(rule, validityContext);
+  return {
+    validity,
+    candidates: validity.valid
+      ? transactions.filter((transaction) =>
+          transaction.id !== excludedTransactionId &&
+          ruleMatchesTransactionForBackfill(rule, transaction) &&
+          !transactionAlreadyHasRuleResult(transaction, rule)
+        )
+      : [],
+  };
+};
 
 export const applyRuleClassificationToTransaction = (
   tx: Transaction,

@@ -1,7 +1,7 @@
 import type { Account, Category, ClassificationRule, Subcategory, Transaction } from './types';
 import { validateCategorySelection } from './category-ownership';
 import { findPotentialTransfers } from './utils/duplicate-utils';
-import { validateInternalTransfer } from './internal-transfer';
+import { describeRuleValidity, validateRuleAction } from './rule-validity';
 import {
   applyRuleClassificationToTransaction,
   applyRulesToTransactionWithResult,
@@ -52,36 +52,20 @@ export const preflightRuleBackfill = ({
     throw new Error('The selected rule no longer exists. Refresh and try again.');
   }
 
+  const validityContext = { workspaceId, accounts, categories };
+  const validity = validateRuleAction(rule, validityContext);
+  if (!validity.valid) throw new Error(describeRuleValidity(validity));
+
   const isTransferRule = rule.action.type === 'InternalTransfer';
   if (isTransferRule && !transferDecision) {
     throw new Error('Choose whether to create reciprocal counterparts or keep the transfers unpaired.');
   }
-
-  validateCategorySelection(
-    categories,
-    workspaceId,
-    rule.action.categoryId,
-    rule.action.subcategoryId
-  );
 
   const candidateIds = new Set(candidates.map((transaction) => transaction.id));
   const currentById = new Map(currentTransactions.map((transaction) => [transaction.id, transaction]));
   const accountIds = new Set(
     accounts.filter((account) => account.workspaceId === workspaceId).map((account) => account.id)
   );
-  if (rule.match.accountId && !accountIds.has(rule.match.accountId)) {
-    throw new Error('The rule account does not belong to this workspace.');
-  }
-  if (isTransferRule) {
-    const transferValidation = validateInternalTransfer({
-      type: 'InternalTransfer',
-      accountId: rule.match.accountId,
-      internalDirection: rule.action.internalDirection,
-      destinationAccountId: rule.action.destinationAccountId,
-    }, accounts, workspaceId);
-    if (!transferValidation.valid) throw new Error(transferValidation.reason);
-  }
-
   const usedCounterpartIds = new Set<string>();
   const plan: RuleBackfillPlanItem[] = [];
   for (const transactionId of ids) {
@@ -99,7 +83,11 @@ export const preflightRuleBackfill = ({
       throw new Error('One or more selected transactions no longer match this rule. Refresh and try again.');
     }
     if (currentRules) {
-      const evaluation = applyRulesToTransactionWithResult(transaction, currentRules);
+      const evaluation = applyRulesToTransactionWithResult(
+        transaction,
+        currentRules,
+        validityContext
+      );
       if (evaluation.conflict) {
         throw new Error(evaluation.conflictReason);
       }

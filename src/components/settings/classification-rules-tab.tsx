@@ -6,6 +6,7 @@ import { Trash2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
@@ -25,6 +26,11 @@ import { apiDeleteRule, apiGetRules, apiSaveRule } from '@/lib/api';
 import { getChangedRules } from '@/lib/settings-change-sets';
 import type { ClassificationRule, Transaction } from '@/lib/types';
 import { isWorkspaceResponseCurrent } from '@/lib/workspace-client-state';
+import {
+  describeRuleValidity,
+  INVALID_RULE_LABEL,
+  validateRuleAction,
+} from '@/lib/rule-validity';
 
 const ANY_VALUE = '__any__';
 
@@ -182,7 +188,9 @@ export function ClassificationRulesTab() {
       toast({
         variant: 'destructive',
         title: 'Failed to save rules',
-        description: 'Something went wrong while saving your rules.',
+        description: error instanceof Error
+          ? error.message
+          : 'Something went wrong while saving your rules.',
       });
     } finally {
       setIsSaving(false);
@@ -222,30 +230,45 @@ export function ClassificationRulesTab() {
                 {editableRules.map((rule) => {
                   const categoryOptions = getCategoryOptions(rule);
                   const subcategoryOptions = getSubcategoryOptions(rule);
+                  const validity = validateRuleAction(rule, {
+                    workspaceId: workspaceId ?? rule.workspaceId,
+                    accounts,
+                    categories,
+                  });
                   return (
-                    <TableRow key={rule.id}>
+                    <TableRow key={rule.id} className={!validity.valid ? 'bg-destructive/5' : undefined}>
                       <TableCell>
-                        <div className="flex min-w-[330px] gap-2">
-                          <Select
-                            value={rule.match.matchMode ?? 'contains'}
-                            onValueChange={(value) => handleRuleMatchChange(rule.id, {
-                              matchMode: value as ClassificationRule['match']['matchMode'],
-                            })}
-                          >
-                            <SelectTrigger className="w-[140px] shrink-0"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="contains">Contains</SelectItem>
-                              <SelectItem value="starts_with">Starts with</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <Input
-                            value={rule.match.descriptionContains ?? ''}
-                            onChange={(event) =>
-                              handleRuleMatchChange(rule.id, {
-                                descriptionContains: event.target.value,
-                              })
-                            }
-                          />
+                        <div className="min-w-[330px] space-y-2">
+                          <div className="flex gap-2">
+                            <Select
+                              value={rule.match.matchMode ?? 'contains'}
+                              onValueChange={(value) => handleRuleMatchChange(rule.id, {
+                                matchMode: value as ClassificationRule['match']['matchMode'],
+                              })}
+                            >
+                              <SelectTrigger className="w-[140px] shrink-0"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="contains">Contains</SelectItem>
+                                <SelectItem value="starts_with">Starts with</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Input
+                              value={rule.match.descriptionContains ?? ''}
+                              onChange={(event) =>
+                                handleRuleMatchChange(rule.id, {
+                                  descriptionContains: event.target.value,
+                                })
+                              }
+                            />
+                          </div>
+                          {!validity.valid && (
+                            <div className="flex items-start gap-2 text-xs text-destructive">
+                              <Badge variant="destructive" className="shrink-0">
+                                {INVALID_RULE_LABEL}
+                              </Badge>
+                              <span>{describeRuleValidity(validity)}</span>
+                            </div>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell>
