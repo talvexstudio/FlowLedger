@@ -18,11 +18,13 @@ test('Transactions persists only durable view controls and exposes an obvious ac
   assert.doesNotMatch(table, /selectedIds:\s*viewState/);
 });
 
-test('Dashboard persists its selected period while report and confirmation dialogs remain transient', () => {
+test('Dashboard persists its selected period while the report dialog remains transient', () => {
   const dashboard = source('../app/(app)/dashboard/page.tsx');
   assert.match(dashboard, /getViewStateStorageKey\('dashboard', workspaceId\)/);
   assert.match(dashboard, /const \[showExpenseReport, setShowExpenseReport\] = useState\(false\)/);
-  assert.match(dashboard, /const \[showConfirmDialog, setShowConfirmDialog\] = useState\(false\)/);
+  assert.doesNotMatch(dashboard, /showConfirmDialog/);
+  assert.doesNotMatch(dashboard, /Load Demo Data/);
+  assert.doesNotMatch(dashboard, /apiSeedDemoData/);
   assert.doesNotMatch(dashboard, /showExpenseReport:\s*dashboardViewState/);
 });
 

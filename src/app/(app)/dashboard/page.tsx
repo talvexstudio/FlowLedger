@@ -6,23 +6,10 @@ import { ExpensesChart } from '@/components/dashboard/expenses-chart';
 import { ReviewTransactions } from '@/components/dashboard/review-transactions';
 import { selectTransactionsToReview } from '@/lib/transaction-review';
 import { DashboardDateRangePicker, getDefaultDateRange, type DashboardDateRange } from '@/components/dashboard/date-range-picker';
-import { DollarSign, ArrowUp, ArrowDown, PiggyBank, Sparkles, TriangleAlert, BarChart3 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { DollarSign, ArrowUp, ArrowDown, PiggyBank, BarChart3 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useToast } from '@/hooks/use-toast';
 import { useEffect, useMemo, useState } from 'react';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
-import { apiSeedDemoData } from '@/lib/api';
 import { buildDashboardReport } from '@/app/(app)/dashboard/utils';
 import { ExpenseReportDialog } from '@/components/dashboard/expense-report-dialog';
 import { buildExpenseReportModel } from '@/lib/expense-report';
@@ -35,18 +22,14 @@ import {
 import { getViewStateStorageKey } from '@/lib/view-state';
 
 export default function DashboardPage() {
-  const { toast } = useToast();
   const { 
     accounts,
     workspaces,
     transactions, 
     categories,
-    workspaceId, 
-    reloadAccounts, 
-    reloadTransactions 
+    workspaceId
   } = useFlowLedger();
 
-  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [showExpenseReport, setShowExpenseReport] = useState(false);
   const defaultDateRange = useMemo(getDefaultDateRange, []);
   const defaultDashboardViewState = useMemo(() => ({
@@ -69,63 +52,8 @@ export default function DashboardPage() {
   }), [dashboardViewState, defaultDateRange]);
 
   useEffect(() => {
-    setShowConfirmDialog(false);
     setShowExpenseReport(false);
   }, [workspaceId]);
-
-  const loadDemoData = async () => {
-    if (!workspaceId) {
-      toast({
-        variant: 'destructive',
-        title: 'No workspace selected',
-        description: 'Please select or create a workspace first.',
-      });
-      return;
-    }
-    try {
-      await apiSeedDemoData(workspaceId, false);
-      reloadAccounts();
-      reloadTransactions();
-      
-      toast({
-        title: 'Demo Data Loaded',
-        description: 'Sample accounts and transactions have been added to your workspace.',
-      });
-    } catch (error) {
-       toast({
-        variant: 'destructive',
-        title: 'Failed to load demo data',
-        description: 'An error occurred while loading the demo data. Please try again.',
-      });
-    }
-  }
-  
-  const handleLoadDemoClick = () => {
-    const isWorkspaceEmpty = accounts.length === 0 && transactions.length === 0;
-    if (isWorkspaceEmpty) {
-      loadDemoData();
-    } else {
-      setShowConfirmDialog(true);
-    }
-  };
-
-  const handleReplaceData = async () => {
-    if (!workspaceId) return;
-
-    setShowConfirmDialog(false);
-    try {
-      await apiSeedDemoData(workspaceId, true);
-      reloadAccounts();
-      reloadTransactions();
-      toast({ title: 'Demo Data Loaded', description: 'Sample accounts and transactions have been added.' });
-    } catch(error) {
-        toast({
-            variant: 'destructive',
-            title: 'Failed to replace data',
-            description: 'Could not replace existing data. Please try again.',
-        });
-    }
-  };
 
   const dashboardReport = useMemo(
     () => buildDashboardReport(
@@ -178,10 +106,6 @@ export default function DashboardPage() {
               preset: range.preset,
             })}
           />
-          <Button onClick={handleLoadDemoClick} variant="outline">
-            <Sparkles className="mr-2 h-4 w-4" />
-            Load Demo Data
-          </Button>
         </div>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
           <KpiCard
@@ -210,7 +134,7 @@ export default function DashboardPage() {
           />
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Period Averages</CardTitle>
+              <CardTitle className="text-sm font-medium">Monthly Average</CardTitle>
               <BarChart3 className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
@@ -244,23 +168,6 @@ export default function DashboardPage() {
           <ReviewTransactions transactions={transactionsToReview} />
         </div>
       </div>
-      <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center">
-               <TriangleAlert className="text-destructive mr-2" />
-               Replace existing data with demo data?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              This workspace already contains accounts and transactions. If you continue, all existing data in this workspace will be deleted and replaced with demo data. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleReplaceData} className="bg-destructive hover:bg-destructive/90">Replace Data</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
       <ExpenseReportDialog
         open={showExpenseReport}
         onOpenChange={setShowExpenseReport}

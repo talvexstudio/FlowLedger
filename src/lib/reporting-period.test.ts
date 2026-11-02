@@ -32,6 +32,25 @@ test('leap-year February uses 29 calendar days', () => {
   closeTo(calculateEquivalentCalendarMonths(new Date(2028, 1, 1), new Date(2028, 1, 15)), 15 / 29);
 });
 
+test('one-day period uses one actual calendar-day fraction', () => {
+  closeTo(calculateEquivalentCalendarMonths(new Date(2026, 7, 16), new Date(2026, 7, 16)), 1 / 31);
+});
+
+test('cross-month and cross-year ranges sum each touched calendar-month fraction', () => {
+  closeTo(
+    calculateEquivalentCalendarMonths(new Date(2026, 7, 16), new Date(2026, 8, 15)),
+    16 / 31 + 15 / 30
+  );
+  closeTo(
+    calculateEquivalentCalendarMonths(new Date(2026, 11, 16), new Date(2027, 0, 15)),
+    16 / 31 + 15 / 31
+  );
+});
+
+test('invalid reversed range has zero coverage', () => {
+  assert.equal(calculateEquivalentCalendarMonths(new Date(2026, 8, 1), new Date(2026, 7, 31)), 0);
+});
+
 test('monthly average preserves signed net values and handles zero coverage safely', () => {
   assert.equal(calculateMonthlyAverage(600, 2), 300);
   assert.equal(calculateMonthlyAverage(-120, 2), -60);

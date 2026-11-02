@@ -4,8 +4,8 @@ import type { Transaction } from '@/lib/types';
 import {
   UNCATEGORIZED_EXPENSE_SLICE_ID,
   buildDashboardReport,
+  getMonthlyAverageDescription,
   getOverviewDescription,
-  getPeriodAverageDescription,
   isWithinDashboardCalendarRange,
   selectDashboardPeriodTransactions,
 } from './utils';
@@ -95,13 +95,14 @@ test('one report population drives headline, overview, averages, and category re
   const chartTotals = overviewTotals(report);
   assert.equal(toCents(chartTotals.income), toCents(report.totals.income));
   assert.equal(toCents(chartTotals.expenses), toCents(report.totals.expenses));
-  assert.equal(toCents(report.averages.income * report.overviewData.length), toCents(report.totals.income));
-  assert.equal(toCents(report.averages.expenses * report.overviewData.length), toCents(report.totals.expenses));
+  assert.equal(report.averages.equivalentMonths, 2);
+  assert.equal(toCents(report.averages.income * report.averages.equivalentMonths), toCents(report.totals.income));
+  assert.equal(toCents(report.averages.expenses * report.averages.equivalentMonths), toCents(report.totals.expenses));
   assert.equal(report.averages.savingsRate, report.totals.savingsRate);
 
   const pieTotal = report.expenseCategoryData.reduce((sum, slice) => sum + slice.total, 0);
   assert.equal(toCents(pieTotal), toCents(report.totals.expenses));
-  assert.equal(report.averages.description, 'Daily average across 61 calendar days');
+  assert.equal(report.averages.description, 'Based on 2.00 equivalent calendar months');
 });
 
 test('uncategorized expenses reconcile while InternalTransfer and pending records remain excluded', () => {
@@ -196,7 +197,10 @@ test('monthly grouping is clipped to the exact selected calendar range', () => {
   assert.equal(report.overviewData.length, 4);
   assert.equal(report.totals.income, 30);
   assert.equal(overviewTotals(report).income, 30);
-  assert.equal(report.averages.description, 'Monthly average across 4 calendar months');
+  const equivalentMonths = 17 / 31 + 1 + 1 + 20 / 30;
+  assert.ok(Math.abs(report.averages.equivalentMonths - equivalentMonths) < 1e-10);
+  assert.ok(Math.abs(report.averages.income - 30 / equivalentMonths) < 1e-10);
+  assert.equal(report.averages.description, `Based on ${equivalentMonths.toFixed(2)} equivalent calendar months`);
 });
 
 test('quarterly grouping is clipped to the exact selected calendar range', () => {
@@ -212,10 +216,11 @@ test('quarterly grouping is clipped to the exact selected calendar range', () =>
   assert.equal(report.grouping, 'quarterly');
   assert.equal(report.totals.income, 30);
   assert.equal(overviewTotals(report).income, 30);
-  assert.equal(report.averages.description, 'Quarterly average across 5 quarters');
+  assert.ok(Math.abs(report.averages.income - 30 / report.averages.equivalentMonths) < 1e-10);
+  assert.match(report.averages.description, /^Based on \d+\.\d{2} equivalent calendar months$/);
 });
 
-test('zero income keeps savings rate safe and overview copy reflects grouping', () => {
+test('short periods still use a monthly average while overview copy reflects grouping', () => {
   const report = buildDashboardReport([
     transaction('expense', new Date(2026, 0, 2, 12), -25, 'Expense'),
   ], categories, new Date(2026, 0, 1), new Date(2026, 0, 3));
@@ -223,7 +228,10 @@ test('zero income keeps savings rate safe and overview copy reflects grouping', 
   assert.equal(report.totals.income, 0);
   assert.equal(report.totals.net, -25);
   assert.equal(report.totals.savingsRate, 0);
-  assert.equal(getPeriodAverageDescription('daily', 1), 'Daily average across 1 calendar day');
+  assert.equal(report.grouping, 'daily');
+  assert.ok(Math.abs(report.averages.equivalentMonths - 3 / 31) < 1e-10);
+  assert.ok(Math.abs(report.averages.expenses - 25 / (3 / 31)) < 1e-10);
+  assert.equal(getMonthlyAverageDescription(1), 'Based on 1.00 equivalent calendar month');
   assert.equal(getOverviewDescription('daily'), 'Daily totals in selected period.');
   assert.equal(getOverviewDescription('monthly'), 'Monthly totals in selected period.');
   assert.equal(getOverviewDescription('quarterly'), 'Quarterly totals in selected period.');

@@ -1,13 +1,23 @@
 'use client';
 
-import { useState, type ChangeEvent } from 'react';
-import { AlertTriangle, Download, Loader2, RotateCcw, Trash2, Upload } from 'lucide-react';
+import { useEffect, useState, type ChangeEvent } from 'react';
+import { AlertTriangle, Download, Loader2, RotateCcw, Sparkles, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Separator } from '@/components/ui/separator';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { ImportHistoryPanel } from '@/components/settings/import-history-panel';
 import { useToast } from '@/hooks/use-toast';
 import type { DataResetOperation, DataResetPreview } from '@/lib/data-management/data-reset';
@@ -35,6 +45,7 @@ import {
   clearAllPersistedViewState,
   getBrowserViewStateStorage,
 } from '@/lib/view-state';
+import { apiSeedDemoData } from '@/lib/api';
 
 type RestoreApiError = { error?: { code?: string; message?: string } };
 
@@ -62,9 +73,63 @@ export function DataStoragePanel() {
   const [resetPreviewing, setResetPreviewing] = useState<DataResetOperation | null>(null);
   const [resetConfirmed, setResetConfirmed] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [demoConfirmOpen, setDemoConfirmOpen] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
   const { toast } = useToast();
-  const { workspaceId, workspaces } = useFlowLedger();
+  const {
+    workspaceId,
+    workspaces,
+    accounts,
+    transactions,
+    isLoading,
+    reloadAccounts,
+    reloadTransactions,
+  } = useFlowLedger();
   const selectedWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
+
+  useEffect(() => {
+    setDemoConfirmOpen(false);
+  }, [workspaceId]);
+
+  const loadDemoData = async (clear: boolean) => {
+    if (!workspaceId) {
+      toast({
+        variant: 'destructive',
+        title: 'No workspace selected',
+        description: 'Select or create a workspace before loading demo data.',
+      });
+      return;
+    }
+    setDemoLoading(true);
+    try {
+      await apiSeedDemoData(workspaceId, clear);
+      await Promise.all([reloadAccounts(), reloadTransactions()]);
+      setDemoConfirmOpen(false);
+      toast({
+        title: 'Demo Data Loaded',
+        description: `Sample accounts and transactions were loaded into ${selectedWorkspace?.name ?? 'the selected workspace'}.`,
+      });
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Failed to load demo data',
+        description: error instanceof Error
+          ? error.message
+          : 'Demo data could not be loaded.',
+      });
+    } finally {
+      setDemoLoading(false);
+    }
+  };
+
+  const handleLoadDemoClick = () => {
+    if (!workspaceId || isLoading || demoLoading) return;
+    if (accounts.length === 0 && transactions.length === 0) {
+      void loadDemoData(false);
+      return;
+    }
+    setDemoConfirmOpen(true);
+  };
 
   const exportBackup = async (backupScope: BackupScope) => {
     if (backupScope !== 'everything' && !workspaceId) {
@@ -266,6 +331,38 @@ export function DataStoragePanel() {
             {exporting ? <Loader2 className="animate-spin" /> : <Download />}
             {exporting ? 'Exporting...' : 'Export backup'}
           </Button>
+        </section>
+
+        <Separator />
+
+        <section className="space-y-4">
+          <div>
+            <h3 className="font-medium">Demo data</h3>
+            <p className="text-sm text-muted-foreground">
+              Populate the selected workspace with sample accounts and transactions for experimentation and testing.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-4 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="font-medium">Load Demo Data</p>
+              <p className="text-sm text-muted-foreground">
+                Target: {selectedWorkspace?.name ?? 'No workspace selected'}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Existing accounts or transactions require confirmation before they are replaced.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleLoadDemoClick}
+              disabled={!workspaceId || isLoading || demoLoading || restoring || resetting}
+            >
+              {demoLoading ? <Loader2 className="animate-spin" /> : <Sparkles />}
+              {demoLoading ? 'Loading demo data...' : 'Load Demo Data'}
+            </Button>
+          </div>
         </section>
 
         <Separator />
@@ -523,9 +620,43 @@ export function DataStoragePanel() {
         <Separator />
 
         <ImportHistoryPanel
-          externalBusy={exporting || restoring || resetting}
+          externalBusy={exporting || restoring || resetting || demoLoading}
           onExportActivityBackup={() => exportBackup('activity')}
         />
+
+        <AlertDialog
+          open={demoConfirmOpen}
+          onOpenChange={(open) => {
+            if (demoLoading) return;
+            setDemoConfirmOpen(open);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center">
+                <AlertTriangle className="mr-2 text-destructive" />
+                Replace this workspace’s accounts and transactions with demo data?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                All accounts and transactions in {selectedWorkspace?.name ?? 'the selected workspace'} will be removed and replaced with sample accounts and transactions. Other workspaces will not be affected. This cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={demoLoading}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(event) => {
+                  event.preventDefault();
+                  void loadDemoData(true);
+                }}
+                disabled={demoLoading}
+                className="bg-destructive hover:bg-destructive/90"
+              >
+                {demoLoading ? <Loader2 className="animate-spin" /> : null}
+                {demoLoading ? 'Replacing...' : 'Replace with Demo Data'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </CardContent>
     </Card>
   );

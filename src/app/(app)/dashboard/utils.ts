@@ -12,6 +12,8 @@ import {
 } from 'date-fns';
 import type { Category, Transaction } from '@/lib/types';
 import {
+  calculateEquivalentCalendarMonths,
+  calculateMonthlyAverage,
   isWithinReportingCalendarRange,
   selectConfirmedReportingPeriodTransactions,
   toReportingDate,
@@ -228,16 +230,11 @@ export function buildExpenseCategoryData(
     .sort((a, b) => b.total - a.total);
 }
 
-export function getPeriodAverageDescription(
-  grouping: DashboardRangeGrouping,
-  pointCount: number
-): string {
-  const label = grouping === 'daily'
-    ? 'calendar day'
-    : grouping === 'monthly' ? 'calendar month' : 'quarter';
-  const unit = pointCount === 1 ? label : `${label}s`;
-  const prefix = grouping === 'daily' ? 'Daily' : grouping === 'monthly' ? 'Monthly' : 'Quarterly';
-  return `${prefix} average across ${pointCount} ${unit}`;
+export function getMonthlyAverageDescription(equivalentMonths: number): string {
+  const unit = Math.abs(equivalentMonths - 1) < Number.EPSILON
+    ? 'month'
+    : 'months';
+  return `Based on ${equivalentMonths.toFixed(2)} equivalent calendar ${unit}`;
 }
 
 export function getOverviewDescription(grouping: DashboardRangeGrouping): string {
@@ -256,7 +253,7 @@ export function buildDashboardReport(
   const grouping = getDashboardRangeGrouping(start, end);
   const overviewData = buildRangeOverviewData(selectedPeriodTransactions, categories, start, end, grouping);
   const expenseCategoryData = buildExpenseCategoryData(selectedPeriodTransactions, categories);
-  const pointCount = overviewData.length || 1;
+  const equivalentMonths = calculateEquivalentCalendarMonths(start, end);
 
   return {
     selectedPeriodTransactions,
@@ -265,10 +262,11 @@ export function buildDashboardReport(
     overviewData,
     expenseCategoryData,
     averages: {
-      income: totals.income / pointCount,
-      expenses: totals.expenses / pointCount,
+      income: calculateMonthlyAverage(totals.income, equivalentMonths),
+      expenses: calculateMonthlyAverage(totals.expenses, equivalentMonths),
       savingsRate: totals.savingsRate,
-      description: getPeriodAverageDescription(grouping, overviewData.length),
+      equivalentMonths,
+      description: getMonthlyAverageDescription(equivalentMonths),
     },
   };
 }
