@@ -7,12 +7,13 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { BudgetLines } from '@/components/budget/budget-lines';
 import { BudgetCopyDialog, type BudgetCopyDialogRequest } from '@/components/budget/budget-copy-dialog';
+import { BudgetSuggestionDialog } from '@/components/budget/budget-suggestion-dialog';
 import { useFlowLedger } from '@/hooks/use-flow-ledger';
 import { useToast } from '@/hooks/use-toast';
 import { apiSaveBudgetLine, apiDeleteBudgetLine } from '@/lib/api';
 import { shiftBudgetMonth } from '@/lib/budget-navigation';
 import { getPreviousBudgetMonthReference } from '@/lib/budget-planning';
-import { ChevronLeft, ChevronRight, Copy } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Copy, History } from 'lucide-react';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -20,7 +21,7 @@ const MONTH_NAMES = [
 ];
 
 export default function BudgetPage() {
-  const { categories, transactions, budgetLines, budgetYear, workspaceId, reloadBudget } = useFlowLedger();
+  const { workspaces, categories, transactions, budgetLines, budgetYear, workspaceId, reloadBudget } = useFlowLedger();
   const { toast } = useToast();
 
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
@@ -30,11 +31,14 @@ export default function BudgetPage() {
   const [amountInput, setAmountInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [copyDialogRequest, setCopyDialogRequest] = useState<BudgetCopyDialogRequest | null>(null);
+  const [suggestionDialogOpen, setSuggestionDialogOpen] = useState(false);
+  const selectedWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
 
   useEffect(() => {
     setEditModal(null);
     setAmountInput('');
     setCopyDialogRequest(null);
+    setSuggestionDialogOpen(false);
   }, [workspaceId]);
 
   const yearOptions = Array.from(new Set([
@@ -156,6 +160,10 @@ export default function BudgetPage() {
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setSuggestionDialogOpen(true)} disabled={!workspaceId}>
+                <History className="mr-2 h-4 w-4" />
+                Suggest from history
+              </Button>
               <Button variant="outline" size="sm" onClick={() => setCopyDialogRequest({})} disabled={!workspaceId}>
                 <Copy className="mr-2 h-4 w-4" />
                 Copy budgets
@@ -225,14 +233,27 @@ export default function BudgetPage() {
       )}
 
       {workspaceId ? (
-        <BudgetCopyDialog
-          open={copyDialogRequest !== null}
-          onOpenChange={(open) => { if (!open) setCopyDialogRequest(null); }}
-          workspaceId={workspaceId}
-          target={{ year: selectedYear, month: selectedMonth + 1 }}
-          request={copyDialogRequest ?? undefined}
-          onCopied={() => reloadBudget(selectedYear)}
-        />
+        <>
+          <BudgetCopyDialog
+            open={copyDialogRequest !== null}
+            onOpenChange={(open) => { if (!open) setCopyDialogRequest(null); }}
+            workspaceId={workspaceId}
+            target={{ year: selectedYear, month: selectedMonth + 1 }}
+            request={copyDialogRequest ?? undefined}
+            onCopied={() => reloadBudget(selectedYear)}
+          />
+          <BudgetSuggestionDialog
+            open={suggestionDialogOpen}
+            onOpenChange={setSuggestionDialogOpen}
+            workspaceId={workspaceId}
+            baseCurrency={selectedWorkspace?.baseCurrency ?? 'EUR'}
+            target={{ year: selectedYear, month: selectedMonth + 1 }}
+            transactions={transactions}
+            categories={categories}
+            budgetLines={budgetLines}
+            onApplied={() => reloadBudget(selectedYear)}
+          />
+        </>
       ) : null}
     </div>
   );

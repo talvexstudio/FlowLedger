@@ -1,5 +1,4 @@
 import {
-  addDays,
   differenceInCalendarDays,
   eachDayOfInterval,
   eachMonthOfInterval,
@@ -12,6 +11,11 @@ import {
   subMonths,
 } from 'date-fns';
 import type { Category, Transaction } from '@/lib/types';
+import {
+  isWithinReportingCalendarRange,
+  selectConfirmedReportingPeriodTransactions,
+  toReportingDate,
+} from '@/lib/reporting-period';
 import {
   calculateReportingTotals,
   isConfirmedExpense,
@@ -53,10 +57,7 @@ export function getLast12MonthsRange(): { start: Date; end: Date } {
 }
 
 export function toDate(value: string | Date | undefined | null): Date | null {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  const d = new Date(value);
-  return isNaN(d.getTime()) ? null : d;
+  return toReportingDate(value);
 }
 
 export function isWithinDashboardCalendarRange(
@@ -64,11 +65,7 @@ export function isWithinDashboardCalendarRange(
   start: Date,
   end: Date
 ): boolean {
-  const date = toDate(value);
-  if (!date) return false;
-  const rangeStart = startOfDay(start);
-  const rangeEndExclusive = addDays(startOfDay(end), 1);
-  return date >= rangeStart && date < rangeEndExclusive;
+  return isWithinReportingCalendarRange(value, start, end);
 }
 
 export function selectDashboardPeriodTransactions(
@@ -76,11 +73,7 @@ export function selectDashboardPeriodTransactions(
   start: Date,
   end: Date
 ): Transaction[] {
-  return transactions.filter(
-    (transaction) =>
-      !transaction.needsReview &&
-      isWithinDashboardCalendarRange(transaction.date, start, end)
-  );
+  return selectConfirmedReportingPeriodTransactions(transactions, start, end);
 }
 
 export function calculateDashboardTotals(

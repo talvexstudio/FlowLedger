@@ -23,7 +23,8 @@ export type DataManagementOperationKind =
   | 'workspace-rename'
   | 'workspace-delete'
   | 'demo-data-seed'
-  | 'budget-copy';
+  | 'budget-copy'
+  | 'budget-suggestion-apply';
 
 export type RestoreJournalState = 'prepared' | 'replacing' | 'rollback_failed' | 'rolled_back' | 'completed';
 

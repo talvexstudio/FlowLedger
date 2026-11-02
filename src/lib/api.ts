@@ -32,6 +32,10 @@ import type {
   BudgetMonthReference,
 } from '@/lib/data-management/budget-copy';
 import type {
+  BudgetSuggestionApplyInput,
+  BudgetSuggestionApplyResult,
+} from '@/lib/data-management/budget-suggestion-apply';
+import type {
   CreateWorkspaceInput,
   CreateWorkspaceResult,
 } from '@/lib/workspace-lifecycle-types';
@@ -326,6 +330,12 @@ export const apiPreviewBudgetCopy = (input: BudgetCopyInput) =>
 
 export const apiCopyBudgets = (input: BudgetCopyInput) =>
   call<BudgetCopyResult>('/api/budgets/copy', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+
+export const apiApplyBudgetSuggestions = (input: BudgetSuggestionApplyInput) =>
+  call<BudgetSuggestionApplyResult>('/api/budgets/suggestions/apply', {
     method: 'POST',
     body: JSON.stringify(input),
   });
